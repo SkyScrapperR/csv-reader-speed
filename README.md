@@ -9,16 +9,16 @@ including stray CRs, quote junk, unterminated quotes, short rows and long rows.
 
 How it works:
 
-- `main.ts` reads `/input/cases.json` as bytes. `fast.cjs` walks the JSON and reads each case's CSV straight from its
-  JSON-escaped bytes: `,`, `\"`, `\n` and `\r` are the CSV characters, and the raw `"` ends the text. It writes
-  `answers.json` bytes directly, each field as its own escaped bytes. There is no JSON.parse, no JSON.stringify and
-  no JS string per field. Line numbers, errors and row padding or cutting are done inline in the same pass.
-- On input it doesn't expect (another JSON shape, or a `\u` escape of a comma, quote, CR or LF), it hands the file
-  to the plain path: JSON.parse, then `run` from `solve.js` on each case, then JSON.stringify.
-- `solve.js` exports `run(input)`, a plain string-based reader of the same policy. It is the fallback and the
-  reference that the byte path is fuzzed against.
-- Before reading the input, the reader runs once on a small constant text holding every rare construct, so V8
-  optimizes it with full type feedback, without later deopts.
+- `main.ts` reads `/input/cases.json` as bytes and calls `run` from `solve.js` once for every case.
+- `run(input)` takes a case in either of two forms. Given `{text, header}`, as the spec writes it, a plain
+  string reader returns the answer object. Given a `ByteCase` (the file's bytes and a case's position), it reads that
+  case's CSV straight from its JSON-escaped bytes: `,`, `\"`, `\n` and `\r` are the CSV characters, and the raw `"`
+  ends the text. It writes the answer as JSON bytes, each field as its own escaped bytes. There is no JSON.parse,
+  no JSON.stringify and no JS string per field. Line numbers, errors and row padding or cutting are done inline.
+- On input the byte form doesn't expect (another JSON shape, or a `\u` escape of a comma, quote, CR or LF),
+  main.ts takes the plain path: JSON.parse, `run` on each `{text, header}`, JSON.stringify.
+- The reader is shaped for V8: per-record functions, a byte-class table with unrolled runs, and rare paths in
+  small helpers called from often-run sites, so a late rare case never deopts the hot loop.
 
 `fuzz/` checks both paths against the reference: random inputs, generator-like files and whole cases.json files
 written with other escapes and spacing. `bench/` measures whole-process CPU, including a 1-CPU Linux container run in CI.

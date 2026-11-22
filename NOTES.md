@@ -178,6 +178,14 @@ whatever the method (JS loop, latin1Write per field, joined rows). The byte path
 - byte pipeline: fuzz/e2e.mjs 100 files x 5000 cases = 500k (other escapes, spacing, key orders, odd headers,
   backslashes, control chars, lone surrogates; 97 files took the byte path), plus the 6 practice cases. 0 mismatches.
 
+### run() per case (compliance tweak, commit eace6a5)
+The byte reader moved into solve.js. run(input) answers {text, header} as the spec says, and also a ByteCase
+(bytes + a case's position + output). main.ts calls run once for every case. Output is byte-identical to ddf7864's.
+Overhead vs 482ee5e on Linux (3 machines): +1.1/+2.6/+1.6% total CPU, +1.7/+4.0/+2.5% net of null (~2-3 ms,
+from require() of the ES module solve.js). Under the 3% bar on total CPU: kept.
+Gates: string fuzz 500k, e2e 500k, big 35, generator e2e 30, practice 6 (0 mismatches), grade-local 6/6
+reproduced, Node 22 three runs byte-identical.
+
 ## Submissions
 | # | date (UTC) | commit | submission id | result |
 |---|------------|--------|---------------|--------|
