@@ -21,10 +21,10 @@ jobs:
         run: |
           set -x
           {
-            ARCH=$(uname -m); URL=https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}
-            wget -nv ${URL}/runsc ${URL}/runsc.sha512 && sha512sum -c runsc.sha512
-            chmod a+rx runsc && sudo mv runsc /usr/local/bin/
-            sudo /usr/local/bin/runsc install
+            curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" | sudo tee /etc/apt/sources.list.d/gvisor.list
+            sudo apt-get update -qq && sudo apt-get install -y -qq runsc
+            sudo runsc install
             sudo systemctl restart docker
             docker info 2>/dev/null | grep -iA2 runtimes || true
             docker run --rm --runtime=runsc node:22-slim node -e "console.log('runsc ok', process.version)"
