@@ -1,0 +1,13 @@
+4
+Model name:                              AMD EPYC 9V74 80-Core Processor
+v22.23.5
+== gVisor (runsc)
+null     cpu med   155.9 trim   155.3 net    -0.6 min   149.2 max   162.1  wall med   229.1
+safety   cpu med   919.5 trim   916.7 net   760.8 min   866.7 max   961.1  wall med   981.2
+whole    cpu med   305.2 trim   304.4 net   148.6 min   294.1 max   308.9  wall med   385.8
+win      cpu med   325.9 trim   327.0 net   171.1 min   316.6 max   339.3  wall med   396.1
+== runc
+null     cpu med    83.6 trim    83.6 net    -0.0 min    82.3 max    87.7  wall med   216.4
+safety   cpu med   609.9 trim   608.2 net   524.6 min   579.6 max   625.7  wall med   728.6
+whole    cpu med   189.7 trim   189.6 net   106.0 min   185.6 max   198.9  wall med   297.4
+win      cpu med   212.0 trim   213.0 net   129.4 min   204.2 max   220.2  wall med   321.1
