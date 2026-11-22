@@ -1,0 +1,11 @@
+4
+CPU(s):                                  4
+Model name:                              AMD EPYC 9V45 96-Core Processor
+v22.23.5
+cur      cpu med   182.2 trim   182.7 net   132.5 min   170.4 max   203.0  wall med   187.5
+noflags  cpu med   189.0 trim   187.7 net   137.4 min   171.6 max   211.2  wall med   189.5
+noinl    cpu med   191.9 trim   189.0 net   138.8 min   176.6 max   215.5  wall med   192.1
+nowarm   cpu med   173.4 trim   175.7 net   125.5 min   167.7 max   194.2  wall med   183.9
+null     cpu med    50.2 trim    50.1 net    -0.1 min    46.4 max    55.8  wall med    58.0
+plain    cpu med   192.9 trim   193.7 net   143.5 min   181.4 max   209.9  wall med   193.6
+sync     cpu med   185.7 trim   185.0 net   134.8 min   171.0 max   217.2  wall med   188.2
