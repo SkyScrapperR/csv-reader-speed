@@ -2,108 +2,141 @@
 // One pass over the text by char code, fields taken as slices of the text, no per-character string building.
 // The work is split into a per-record function so V8 optimizes it by ordinary calls, not by on-stack replacement.
 
-// Reader state for the record being read (set by run, read and advanced by readRecord).
+// Reader state for the record being read (set by run, read and advanced by readRecord and readQuoted).
 let gPos = 0;
 let gLine = 1;
 let gQuoted = false;
 let gErrors = null;
+let gRecLine = 1;
+let gRecRow = null;
+// readQuoted's results: the field's value, how it went on (0 comma, 1 line break, 2 end of text, -1 unquoted text
+// follows: junk after the closing quote, or the reread after a quote that never closes), and for junk the value's
+// length before it (-1: no junk to check).
+let gValue = '';
+let gEnd = 0;
+let gJunkFrom = -1;
 
 function err(code, line, row) {
   return { code, line, row };
+}
+
+// A quoted field whose opening quote is at pos: its own function, called for every quoted field, so its rare paths
+// (a CR inside the quotes, a quote that never closes) deopt only itself. Returns where reading goes on.
+function readQuoted(text, n, pos) {
+  const open = pos;
+  const openLine = gLine;
+  let line = gLine;
+  let value = '';
+  let i = pos + 1;
+  let seg = i;
+  for (;;) {
+    const c = text.charCodeAt(i);
+    if (c > 34) {
+      i++;
+      continue;
+    }
+    if (c === 34) {
+      if (text.charCodeAt(i + 1) === 34) {
+        // "" is one quote
+        value += text.slice(seg, i + 1);
+        i += 2;
+        seg = i;
+        continue;
+      }
+      break; // the closing quote
+    }
+    if (c === 13) {
+      // CRLF and a lone CR inside quotes are each one LF
+      value += text.slice(seg, i) + '\n';
+      line++;
+      i += text.charCodeAt(i + 1) === 10 ? 2 : 1;
+      seg = i;
+      continue;
+    }
+    if (c === 10) line++;
+    else if (i >= n) {
+      // The quote never closes: it is a literal character, and the text after it is read again as unquoted.
+      gLine = openLine;
+      gErrors.push(err('unterminated_quote', gRecLine, gRecRow));
+      gValue = '"';
+      gEnd = -1;
+      gJunkFrom = -1;
+      return open + 1;
+    }
+    i++;
+  }
+  value = value === '' ? text.slice(seg, i) : value + text.slice(seg, i);
+  gValue = value;
+  gJunkFrom = -1;
+  pos = i + 1;
+  const c = text.charCodeAt(pos);
+  if (c === 44) {
+    gEnd = 0;
+    pos++;
+  } else if (c === 10) {
+    gEnd = 1;
+    pos++;
+    line++;
+  } else if (c === 13 && text.charCodeAt(pos + 1) === 10) {
+    gEnd = 1;
+    pos += 2;
+    line++;
+  } else if (pos >= n) {
+    gEnd = 2;
+  } else {
+    // what follows the closing quote is appended as it stands (quote_junk, when the field ends)
+    gEnd = -1;
+    gJunkFrom = value.length;
+  }
+  gLine = line;
+  return pos;
 }
 
 // Reads one record whose first character is at gPos (not a line break); returns its fields and advances gPos/gLine.
 function readRecord(text, n, recLine, recRow) {
   const errors = gErrors;
   let pos = gPos;
-  let line = gLine;
   const fields = [];
   let quoted = false;
+  gRecLine = recLine;
+  gRecRow = recRow;
   for (;;) {
     let value = '';
-    let start = pos;
-    let junkFrom = -1; // value length before junk; -1 when not after a closing quote
-    quoted = pos < n && text.charCodeAt(pos) === 34;
+    let junkFrom = -1;
+    quoted = text.charCodeAt(pos) === 34;
     if (quoted) {
-      const open = pos;
-      const openLine = line;
-      let i = pos + 1;
-      let seg = i;
-      let closed = false;
-      while (i < n) {
-        const c = text.charCodeAt(i);
-        if (c > 34) {
-          i++;
-        } else if (c === 34) {
-          if (i + 1 < n && text.charCodeAt(i + 1) === 34) {
-            value += text.slice(seg, i + 1);
-            i += 2;
-            seg = i;
-          } else {
-            closed = true;
-            break;
-          }
-        } else if (c === 13) {
-          value += text.slice(seg, i) + '\n';
-          line++;
-          i += i + 1 < n && text.charCodeAt(i + 1) === 10 ? 2 : 1;
-          seg = i;
-        } else {
-          if (c === 10) line++;
-          i++;
-        }
+      pos = readQuoted(text, n, pos);
+      const end = gEnd;
+      if (end >= 0) {
+        fields.push(gValue);
+        if (end === 0) continue;
+        break;
       }
-      if (closed) {
-        value = value === '' ? text.slice(seg, i) : value + text.slice(seg, i);
-        pos = i + 1;
-        if (pos >= n) {
-          fields.push(value);
-          break;
-        }
-        const c = text.charCodeAt(pos);
-        if (c === 44) {
-          pos++;
-          fields.push(value);
-          continue;
-        }
-        if (c === 10) {
-          pos++;
-          line++;
-          fields.push(value);
-          break;
-        }
-        if (c === 13 && pos + 1 < n && text.charCodeAt(pos + 1) === 10) {
-          pos += 2;
-          line++;
-          fields.push(value);
-          break;
-        }
-        junkFrom = value.length;
-        start = pos;
-      } else {
-        pos = open + 1;
-        line = openLine;
-        errors.push(err('unterminated_quote', recLine, recRow));
-        value = '"';
-        start = pos;
-      }
+      value = gValue;
+      junkFrom = gJunkFrom;
     }
 
-    // Unquoted text up to the next comma or line break; a CR not followed by LF is dropped (stray_cr).
-    let i = start;
+    // Unquoted text up to the next comma or line break; a CR not followed by LF is dropped (stray_cr). One compare
+    // a char on the common path: past the end charCodeAt is NaN, which only the last test (i >= n) takes.
+    let start = pos;
+    let i = pos;
     let ended = 2; // 0 comma, 1 LF, 3 CRLF, 2 end of text
-    while (i < n) {
+    for (;;) {
       const c = text.charCodeAt(i);
       if (c > 44) {
         i++;
-      } else if (c === 44) {
+        continue;
+      }
+      if (c === 44) {
         ended = 0;
         break;
-      } else if (c === 10) {
+      }
+      if (c === 10) {
         ended = 1;
         break;
-      } else if (c === 13) {
-        if (i + 1 < n && text.charCodeAt(i + 1) === 10) {
+      }
+      if (c === 13) {
+        if (text.charCodeAt(i + 1) === 10) {
           ended = 3;
           break;
         }
@@ -111,9 +144,10 @@ function readRecord(text, n, recLine, recRow) {
         value += text.slice(start, i);
         i++;
         start = i;
-      } else {
-        i++;
+        continue;
       }
+      if (i >= n) break;
+      i++;
     }
     value = value === '' ? text.slice(start, i) : value + text.slice(start, i);
     if (junkFrom >= 0 && value.length > junkFrom) errors.push(err('quote_junk', recLine, recRow));
@@ -124,17 +158,16 @@ function readRecord(text, n, recLine, recRow) {
     }
     if (ended === 1) {
       pos = i + 1;
-      line++;
+      gLine++;
     } else if (ended === 3) {
       pos = i + 2;
-      line++;
+      gLine++;
     } else {
       pos = i;
     }
     break;
   }
   gPos = pos;
-  gLine = line;
   gQuoted = quoted;
   return fields;
 }
