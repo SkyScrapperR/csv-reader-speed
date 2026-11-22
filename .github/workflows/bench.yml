@@ -8,6 +8,9 @@ permissions:
 jobs:
   bench:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: [1, 2, 3]
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +21,7 @@ jobs:
         run: |
           (nproc; lscpu | grep -E 'Model name|^CPU\(s\)'; docker run --rm node:22-slim node --version) > result.txt
           docker run --rm --cpus 1 --memory 1024m -v $PWD/var:/v:ro -v $PWD/gen:/in:ro -v $PWD/bench:/b:ro node:22-slim \
-            bash -c 'mkdir -p /tmp/out && bash /b/cgroup-run.sh 21 $(ls /v)' > runs.txt
+            bash -c 'mkdir -p /tmp/out && bash /b/cgroup-run.sh 31 $(ls /v)' > runs.txt
           node bench/summarize.mjs < runs.txt >> result.txt
           cat result.txt
       - name: publish results
@@ -27,4 +30,4 @@ jobs:
           mkdir -p /tmp/res && cp result.txt runs.txt /tmp/res/
           git fetch origin bench-results || true
           git checkout --orphan res && git rm -rfq . && cp /tmp/res/* . && git add result.txt runs.txt
-          git commit -qm "results ${GITHUB_SHA::7}" && git push -f origin res:bench-results
+          git commit -qm "results ${GITHUB_SHA::7} shard ${{ matrix.shard }}" && git push -f origin res:bench-results-${{ matrix.shard }}

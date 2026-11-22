@@ -7,12 +7,21 @@
 A faster drop-in for make.fun's csv-reader 1.0.0. It gives the same `{columns, rows, errors}` for every input,
 including stray CRs, quote junk, unterminated quotes, short rows and long rows.
 
-How it works: `solve.js` reads the text once, from left to right, by char code. A field is a slice of the input
-string. Strings are only built up for the rare cases: `""` escapes, CRs inside quotes, and dropped stray CRs.
-Line numbers are counted inline, and rows are padded or cut as each record ends. `main.ts` reads
-`/input/cases.json`, answers every case with `run`, and writes `/output/answers.json`.
+How it works:
 
-`fuzz/` checks solve.js against the reference, both on random inputs and on the kit's generator. `bench/` measures it.
+- `main.ts` reads `/input/cases.json` as bytes. `fast.cjs` walks the JSON and reads each case's CSV straight from its
+  JSON-escaped bytes: `,`, `\"`, `\n` and `\r` are the CSV characters, and the raw `"` ends the text. It writes
+  `answers.json` bytes directly, each field as its own escaped bytes. There is no JSON.parse, no JSON.stringify and
+  no JS string per field. Line numbers, errors and row padding or cutting are done inline in the same pass.
+- On input it doesn't expect (another JSON shape, or a `\u` escape of a comma, quote, CR or LF), it hands the file
+  to the plain path: JSON.parse, then `run` from `solve.js` on each case, then JSON.stringify.
+- `solve.js` exports `run(input)`, a plain string-based reader of the same policy. It is the fallback and the
+  reference that the byte path is fuzzed against.
+- Before reading the input, the reader runs once on a small constant text holding every rare construct, so V8
+  optimizes it with full type feedback, without later deopts.
+
+`fuzz/` checks both paths against the reference: random inputs, generator-like files and whole cases.json files
+written with other escapes and spacing. `bench/` measures whole-process CPU, including a 1-CPU Linux container run in CI.
 
 ## Run it
 

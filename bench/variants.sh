@@ -8,8 +8,6 @@ mkv() { # name, sed script applied to main.ts
 }
 mkv cur ''
 mkv nowarm 's/^warmUp();//'
-mkv noflags "/setFlagsFromString('--no-/d"
+mkv nowarm_lfa "s/^warmUp();//; /no-turbo-inlining/d"
 mkv plain "/setFlagsFromString('--no-/d; s/^warmUp();//"
-mkv sync "s/^warmUp();/v8.setFlagsFromString('--no-concurrent-recompilation');\nwarmUp();/"
-mkv noinl "/no-turbo-inlining/d"
 mkdir -p "$V/null"; echo "" > "$V/null/main.ts"
