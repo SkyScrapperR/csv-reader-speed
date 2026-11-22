@@ -70,12 +70,12 @@
 ### Optimization target (updated with the second brief)
 End-to-end process CPU, because the heat measures container CPU over the whole `node main.ts` run (startup,
 parse, run, stringify, write, GC threads). The qualifying cut uses the graded run's time (the brief says wall).
-Plan: a **byte pipeline** (fast.js). main.ts reads cases.json as a Buffer, walks the JSON itself, reads each CSV
+Plan: a **byte pipeline** (fast.cjs, loaded by a CommonJS main.ts; the repo has no package.json). main.ts reads cases.json as a Buffer, walks the JSON itself, reads each CSV
 straight from the JSON-escaped bytes and writes answers.json bytes directly. There is no JSON.parse, no
 JSON.stringify and no per-field JS string. The scorer compares parsed JSON values, so copying each field's own
 escaped bytes from the input is a valid encoding.
 - solve.js `run(input)` stays the plain, string-based reader. It is the correctness reference and the
-  fallback: fast.js returns null on anything unexpected, and main.ts then does JSON.parse + run + JSON.stringify.
+  fallback: fast.cjs returns null on anything unexpected, and main.ts then does JSON.parse + run + JSON.stringify.
   Unexpected means another JSON shape, an object/array header, or a real `\u00XX` escape of `,` `"` CR or LF.
 - **Rule risk:** the rules text says main.ts "answers each with run". The byte pipeline does not call run(). It
   calls the same reading logic, re-implemented on bytes. I'll flag this to the user before submitting it.
@@ -113,7 +113,28 @@ Machines differ between runs (Xeon 6975P / 8573C, EPYC 7763 / 9V45 / 9V74), so c
 - Reader loop: a 256-entry class table for plain bytes, unrolled 8 bytes (unquoted) / 4 (quoted):
   -10 ms net on Linux, -30% warm locally.
 - Header-agnostic reading: the first record is kept aside and errors are kept as numbers until the `header` key
-  (after the text) is read. This drops the per-text end search: -10% warm locally.
+  (after the text) is read. This drops the per-text end search: -10% warm locally, -7 to -10 ms net on Linux.
+- Deopts: rare branches first taken late (an LF in a CRLF file, a CR in quotes, the end of text, an unterminated
+  quote) made TurboFan deopt readRecord, which then ran in baseline code until it re-tiered. Fixes:
+  - one code path for LF and CRLF, and for every escape inside quotes, so the common cases feed the rare ones;
+  - no compare where the class table already decides;
+  - the rare work moved into small helpers (uEsc, quotedEnd) called from sites that run at every record or every
+    quoted field, so a late deopt only hits the helper.
+  Result: net -13 to -17 ms on Linux. After that, the TurboFan threshold no longer matters (default kept), and
+  unroll depth 8/4 vs 4/2 vs 2/1 is within noise (4/2 kept).
+- Probe (Linux, phases of one run): module load ~2 ms, read ~4-5 ms, the one pass over all cases 45-90 ms
+  (machine-dependent; a second warm pass 30-45 ms), write ~4 ms.
+
+Latest Linux round (CPU ms, net of the null entry), current reader:
+
+| machine | null | entry | entry net |
+|---|---|---|---|
+| EPYC 9V74 | 57 | 158 | ~101 |
+| Xeon 8573C | 69 | 192 | ~125 |
+| EPYC 9V45 | 52 | 137 | ~87 |
+
+Local Windows, pinned to one core, Node 24, practice set: baseline csv-reader net 1937 ms, safety entry
+(string run, utf8) net 1000 ms, **byte pipeline net ~187 ms: about 10x the baseline**.
 
 ### Correctness record
 - string run(): fuzz/fuzz.mjs 200k + 100k random, fuzz/big.mjs (45 kit-generator files + long/tiny/astral), the
