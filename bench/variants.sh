@@ -7,10 +7,13 @@ mkv() { # name, sed script applied to main.ts
   sed -e "$2" "$R/main.ts" > "$d/main.ts"
 }
 mkv cur ''
-# the reader before the deopt-avoiding rewrites (commit 10e596d), with this main.ts
+# the reader before the helper split (commit bfbe943), with this main.ts
 mkv prev ''
-git -C "$R" show 10e596d:fast.cjs > "$V/prev/fast.cjs"
-mkv tf3000 "/invocation-count-for-turbofan/d"
+git -C "$R" show bfbe943:fast.cjs > "$V/prev/fast.cjs"
+addf() { local s=""; for f in "$@"; do s="$s
+v8.setFlagsFromString('$f');"; done; echo "s/^v8.setFlagsFromString('--no-turbo-inlining');/v8.setFlagsFromString('--no-turbo-inlining');$s/"; }
+mkv tf2000 "$(addf --invocation-count-for-turbofan=2000)"
+mkv tf4500 "$(addf --invocation-count-for-turbofan=4500)"
 mkdir -p "$V/null"; echo "" > "$V/null/main.ts"
 # a probe: the entry's main.ts with its phases timed, printed as a PROBE line (lands in runs.txt)
 mkv probe ''
@@ -19,7 +22,6 @@ const t0 = performance.now();
 const v8 = require('node:v8');
 v8.setFlagsFromString('--no-lazy-feedback-allocation');
 v8.setFlagsFromString('--no-turbo-inlining');
-v8.setFlagsFromString('--invocation-count-for-turbofan=6000');
 const { readFileSync, writeFileSync } = require('node:fs');
 const { answers } = require('./fast.cjs');
 const t1 = performance.now();

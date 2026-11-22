@@ -2,11 +2,10 @@
 // fast.cjs reads each case's CSV straight from the JSON bytes and writes the answers' JSON bytes; on input it does
 // not expect it returns null, and solve.js's plain path (JSON.parse, run on each case, JSON.stringify) answers.
 const v8 = require('node:v8');
-// Type feedback from a function's first call, no inlining (the reader's caller compiles in a fraction), and
-// TurboFan a little later (more feedback first, fewer deopts): each measured on Node 22 in a 1-CPU Linux container.
+// Type feedback from a function's first call, and no inlining (the reader's caller compiles in a fraction): each
+// measured on Node 22 in a 1-CPU Linux container.
 v8.setFlagsFromString('--no-lazy-feedback-allocation');
 v8.setFlagsFromString('--no-turbo-inlining');
-v8.setFlagsFromString('--invocation-count-for-turbofan=6000');
 const { readFileSync, writeFileSync } = require('node:fs');
 const { answers } = require('./fast.cjs');
 

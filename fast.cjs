@@ -112,6 +112,91 @@ function writeErrors(header) {
   }
 }
 
+// Results of the two helpers below: the output cursor, how the field went on (-1 unquoted text follows, 0 comma,
+// 1 line break, 2 end of text), and where junk after a closing quote began (-1: none to check).
+let gO = 0;
+let gEnd = 0;
+let gJunk = -1;
+
+// After a quoted field's scan, j past its closing quote (closed) or at the end of the text (not closed): returns
+// where reading goes on.
+function quotedEnd(closed, j, o, open, openLine, fstart) {
+  const b = B;
+  gJunk = -1;
+  if (closed) {
+    const c = b[j];
+    gO = o;
+    if (c === 34) {
+      gEnd = 2;
+      return j;
+    }
+    if (c === 44) {
+      gEnd = 0;
+      return j + 1;
+    }
+    if (c === 92 && b[j + 1] === 110) {
+      line++;
+      gEnd = 1;
+      return j + 2;
+    }
+    if (c === 92 && b[j + 1] === 114 && b[j + 2] === 92 && b[j + 3] === 110) {
+      line++;
+      gEnd = 1;
+      return j + 4;
+    }
+    // what follows the closing quote is appended as it stands (quote_junk, when the field ends)
+    gEnd = -1;
+    gJunk = o;
+    return j;
+  }
+  // The quote never closes: it is a literal character, and the text after it is read again as unquoted.
+  o = fstart + 1;
+  line = openLine;
+  addErr(UNTERM);
+  O[o++] = 92;
+  O[o++] = 34;
+  gO = o;
+  gEnd = -1;
+  return open + 2;
+}
+
+// An escape at i in unquoted text: LF or CRLF ends the record (gEnd 1), a CR not followed by LF is dropped
+// (stray_cr), any other escape is copied as it stands. Returns where reading goes on.
+function uEsc(i, o) {
+  const b = B;
+  const e = b[i + 1];
+  gEnd = 0;
+  gO = o;
+  if (e === 110) {
+    line++;
+    gEnd = 1;
+    return i + 2;
+  }
+  if (e === 114) {
+    if (b[i + 2] === 92 && b[i + 3] === 110) {
+      line++;
+      gEnd = 1;
+      return i + 4;
+    }
+    addErr(STRAY);
+    return i + 2;
+  }
+  const out = O;
+  out[o++] = 92;
+  out[o++] = e;
+  if (e === 117) {
+    if (b[i + 2] === 48 && b[i + 3] === 48) checkEscape(i);
+    out[o++] = b[i + 2];
+    out[o++] = b[i + 3];
+    out[o++] = b[i + 4];
+    out[o++] = b[i + 5];
+    gO = o;
+    return i + 6;
+  }
+  gO = o;
+  return i + 2;
+}
+
 // Reads one record from p (not at a blank line nor the end) into O as "f1","f2",..., returns the next position.
 function readRecord(p, width) {
   const b = B;
@@ -190,37 +275,17 @@ function readRecord(p, width) {
         }
         break; // neither plain nor a backslash: the raw quote that ends the text (no compare to feed)
       }
-      if (closed) {
-        const c = b[j];
-        if (c === 34) {
-          i = j;
-          end = 2;
-        } else if (c === 44) {
-          i = j + 1;
-        } else if (c === 92 && (b[j + 1] === 110 || ((b[j + 1] === 114) & (b[j + 2] === 92) & (b[j + 3] === 110)) === 1)) {
-          // LF or CRLF, one path for both (each compare runs on either kind of file, so V8 has feedback for it)
-          i = j + (b[j + 1] === 110 ? 2 : 4);
-          line++;
-          end = 1;
-        } else {
-          i = j;
-          end = -1;
-          junkFrom = o;
-        }
-        if (end >= 0) {
-          out[o++] = 34;
-          if (end === 0) continue;
-          break;
-        }
-      } else {
-        // The quote never closes: it is a literal character, and the text after it is read again as unquoted.
-        o = fstart + 1;
-        line = openLine;
-        addErr(UNTERM);
-        out[o++] = 92;
+      // What follows the field, in a function of its own (called after every quoted field, so its call is fed, and its
+      // rare paths deopt only itself): a comma, a line break, the end, junk; or, the quote never closing, the reread.
+      i = quotedEnd(closed, j, o, open, openLine, fstart);
+      o = gO;
+      end = gEnd;
+      if (end >= 0) {
         out[o++] = 34;
-        i = open + 2;
+        if (end === 0) continue;
+        break;
       }
+      junkFrom = gJunk;
     }
 
     // Unquoted text up to the next comma or line break; a CR not followed by LF is dropped (stray_cr).
@@ -279,35 +344,14 @@ function readRecord(p, width) {
         break;
       }
       if (c === 92) {
-        const e = b[i + 1];
-        // LF or CRLF ends the record: one path for both (its compares run on either kind of file, so V8 has
-        // feedback for them before it optimizes); a CR not followed by LF is dropped.
-        const crlf = (e === 114) & (b[i + 2] === 92) & (b[i + 3] === 110);
-        if (e === 110 || crlf === 1) {
-          i += 2 + 2 * crlf;
-          line++;
+        // An escape, read by a function of its own: it is called at every record's end (an LF or CRLF), so its call
+        // is fed, and its rare paths (a stray CR, other escapes) deopt only itself.
+        i = uEsc(i, o);
+        o = gO;
+        if (gEnd === 1) {
           end = 1;
           break;
         }
-        if (e === 114) {
-          addErr(STRAY);
-          i += 2;
-          continue;
-        }
-        if (e === 117) {
-          if (b[i + 2] === 48 && b[i + 3] === 48) checkEscape(i);
-          out[o++] = 92;
-          out[o++] = 117;
-          out[o++] = b[i + 2];
-          out[o++] = b[i + 3];
-          out[o++] = b[i + 4];
-          out[o++] = b[i + 5];
-          i += 6;
-          continue;
-        }
-        out[o++] = 92;
-        out[o++] = e;
-        i += 2;
         continue;
       }
       // neither plain, a comma nor a backslash: the raw quote that ends the text (no compare to feed)
