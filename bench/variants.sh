@@ -10,8 +10,7 @@ mkv cur ''
 # the reader before the helper split (commit bfbe943), with this main.ts
 mkv prev ''
 git -C "$R" show bfbe943:fast.cjs > "$V/prev/fast.cjs"
-addf() { local s=""; for f in "$@"; do s="$s
-v8.setFlagsFromString('$f');"; done; echo "s/^v8.setFlagsFromString('--no-turbo-inlining');/v8.setFlagsFromString('--no-turbo-inlining');$s/"; }
+addf() { local s=""; for f in "$@"; do s="$s\nv8.setFlagsFromString('$f');"; done; echo "s/^v8.setFlagsFromString('--no-turbo-inlining');/v8.setFlagsFromString('--no-turbo-inlining');$s/"; }
 mkv tf2000 "$(addf --invocation-count-for-turbofan=2000)"
 mkv tf4500 "$(addf --invocation-count-for-turbofan=4500)"
 mkdir -p "$V/null"; echo "" > "$V/null/main.ts"
