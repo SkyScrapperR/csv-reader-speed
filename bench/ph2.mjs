@@ -1,0 +1,13 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { setFlagsFromString } from 'node:v8';
+setFlagsFromString('--no-incremental-marking');
+for (const f of (process.env.RTFLAGS ?? '').split(' ').filter(Boolean)) setFlagsFromString(f);
+const { run } = await import(new URL('../solve.js', import.meta.url).href);
+const t = []; const mark = (n) => { const u = process.cpuUsage(); t.push([n, performance.now(), (u.user + u.system) / 1000]); };
+mark('s');
+const raw = readFileSync('C:/lomba/csv-reader-speed-01-run-20261121-kit/practice/input/cases.json', 'latin1'); mark('read');
+const cases = JSON.parse(raw); mark('parse');
+const answers = []; for (const c of cases) { const inp = c.input; let x = inp.text; if (x.startsWith('\u00ef\u00bb\u00bf')) x = x.slice(3); answers.push(run({ text: x, header: inp.header })); } mark('run');
+const s = JSON.stringify(answers); mark('stringify');
+writeFileSync(process.env.TEMP + '/ans-l1.json', s, 'latin1'); mark('write');
+for (let i = 1; i < t.length; i++) console.log(t[i][0].padEnd(10), 'wall', (t[i][1] - t[i - 1][1]).toFixed(1).padStart(7), 'cpu', (t[i][2] - t[i - 1][2]).toFixed(1).padStart(7));
