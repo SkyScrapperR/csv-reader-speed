@@ -100,6 +100,21 @@ Synthetic 11 MB set (bench/gen.mjs). CPU ms, median:
 - Semi-space flags do nothing at runtime for the main isolate, but they apply to a Worker created afterwards.
 - Windows timings (15.6 ms ticks, slow laptop core) mislead on JIT/GC choices. Linux CI decides.
 
+### Byte pipeline results (Linux CI, 3 shards a round, interleaved runs; ms CPU net of null)
+Machines differ between runs (Xeon 6975P / 8573C, EPYC 7763 / 9V45 / 9V74), so compare only within a run.
+- Byte path vs string path: net ~177 vs ~304 (best string variant l1g) and ~402 (plain utf8, first entry).
+- CommonJS main.ts (no package.json type, one require) beats ESM by ~11 ms. process.exit(0) at the end: no gain.
+- Flags: `--no-turbo-inlining` helps (~10 ms). `--no-lazy-feedback-allocation` is neutral; kept.
+  Lower TurboFan thresholds (`--invocation-count-for-turbofan` 50/200/500) are 20-40 ms WORSE on Linux, though
+  better on Windows.
+- A JIT warm-up on a constant synthetic text (to avoid deopts) is 5-9 ms worse on Linux: dropped.
+- Node 22's V8 has Maglev off by default (Ignition -> Sparkplug -> TurboFan). Node 24 locally has it on, so
+  local JIT tuning is unreliable. Use the Node 22 binary or CI.
+- Reader loop: a 256-entry class table for plain bytes, unrolled 8 bytes (unquoted) / 4 (quoted):
+  -10 ms net on Linux, -30% warm locally.
+- Header-agnostic reading: the first record is kept aside and errors are kept as numbers until the `header` key
+  (after the text) is read. This drops the per-text end search: -10% warm locally.
+
 ### Correctness record
 - string run(): fuzz/fuzz.mjs 200k + 100k random, fuzz/big.mjs (45 kit-generator files + long/tiny/astral), the
   6 practice cases. 0 mismatches.

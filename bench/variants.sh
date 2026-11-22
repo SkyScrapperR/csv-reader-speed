@@ -9,9 +9,33 @@ mkv() { # name, sed script applied to main.ts
 # extra V8 flags after the entry's own
 addf() { local s=""; for f in "$@"; do s="$s\nv8.setFlagsFromString('$f');"; done; echo "s/^v8.setFlagsFromString('--no-turbo-inlining');/v8.setFlagsFromString('--no-turbo-inlining');$s/"; }
 mkv cur ''
-mkv prev ''
-git -C "$R" show 58b9b81:fast.cjs > "$V/prev/fast.cjs"
-mkv spark "$(addf --always-sparkplug)"
-mkv maglev "$(addf --maglev)"
+# (prev removed)
+
+# mkv spark "$(addf --always-sparkplug)"
+
 mkv tf6000 "$(addf --invocation-count-for-turbofan=6000)"
+mkv tf12k "$(addf --invocation-count-for-turbofan=12000)"
+mkv tf25k "$(addf --invocation-count-for-turbofan=25000)"
+mkv ic1500 "$(addf --invocation-count-for-turbofan=6000 --minimum-invocations-after-ic-update=1500)"
 mkdir -p "$V/null"; echo "" > "$V/null/main.ts"
+# a probe: the entry's main.ts with its phases timed, printed as a PROBE line (lands in runs.txt)
+mkv probe ''
+cat > "$V/probe/main.ts" <<'EOT'
+const t0 = performance.now();
+const v8 = require('node:v8');
+v8.setFlagsFromString('--no-lazy-feedback-allocation');
+v8.setFlagsFromString('--no-turbo-inlining');
+const { readFileSync, writeFileSync } = require('node:fs');
+const { answers } = require('./fast.cjs');
+const t1 = performance.now();
+const env = process.env;
+const input = readFileSync((env.MAKEFUN_INPUT_DIR || '/input') + '/cases.json');
+const t2 = performance.now();
+let out = answers(input);
+const t3 = performance.now();
+answers(input);
+const t4 = performance.now();
+writeFileSync((env.MAKEFUN_OUTPUT_DIR || '/output') + '/answers.json', out);
+const t5 = performance.now();
+console.log(`PROBE start ${t0.toFixed(1)} load ${(t1 - t0).toFixed(1)} read ${(t2 - t1).toFixed(1)} cold ${(t3 - t2).toFixed(1)} warm ${(t4 - t3).toFixed(1)} write ${(t5 - t4).toFixed(1)}`);
+EOT
