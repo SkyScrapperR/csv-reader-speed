@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 50
     strategy:
+      fail-fast: false
       matrix:
         shard: [1, 2, 3]
     steps:
@@ -18,13 +19,18 @@ jobs:
           fetch-depth: 0
       - name: install gVisor (runsc)
         run: |
-          ARCH=$(uname -m); URL=https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}
-          wget -q ${URL}/runsc ${URL}/runsc.sha512
-          sha512sum -c runsc.sha512
-          chmod a+rx runsc && sudo mv runsc /usr/local/bin/
-          sudo /usr/local/bin/runsc install
-          sudo systemctl restart docker
-          docker info | grep -i runtimes
+          set -x
+          {
+            ARCH=$(uname -m); URL=https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}
+            wget -nv ${URL}/runsc ${URL}/runsc.sha512 && sha512sum -c runsc.sha512
+            chmod a+rx runsc && sudo mv runsc /usr/local/bin/
+            sudo /usr/local/bin/runsc install
+            sudo systemctl restart docker
+            docker info 2>/dev/null | grep -iA2 runtimes || true
+            docker run --rm --runtime=runsc node:22-slim node -e "console.log('runsc ok', process.version)"
+            uname -r; cat /sys/fs/cgroup/cgroup.controllers || true
+          } > install.log 2>&1 || true
+          cat install.log
       - run: docker pull -q node:22-slim
       - run: docker run --rm -v $PWD:/r -w /r node:22-slim sh -c 'node bench/gen.mjs /r/gen 42'
       - run: bash bench/variants.sh $PWD/var
@@ -40,8 +46,9 @@ jobs:
         env:
           ROUNDS: 11
       - name: publish results
+        if: always()
         run: |
           git config user.name bench-bot; git config user.email bench-bot@users.noreply.github.com
-          mkdir -p /tmp/res && cp result.txt runs-*.txt /tmp/res/
-          git checkout --orphan res && git rm -rfq . && cp /tmp/res/* . && git add result.txt runs-*.txt
+          mkdir -p /tmp/res && cp install.log /tmp/res/ 2>/dev/null; cp result.txt runs-*.txt /tmp/res/ 2>/dev/null; touch /tmp/res/result.txt
+          git checkout --orphan res && git rm -rfq . && cp /tmp/res/* . && git add .
           git commit -qm "results ${GITHUB_SHA::7} shard ${{ matrix.shard }}" && git push -f origin res:bench-results-${{ matrix.shard }}
