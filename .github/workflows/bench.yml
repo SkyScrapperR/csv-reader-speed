@@ -18,7 +18,7 @@ jobs:
         run: |
           (nproc; lscpu | grep -E 'Model name|^CPU\(s\)'; docker run --rm node:22-slim node --version) > result.txt
           docker run --rm --cpus 1 --memory 1024m -v $PWD/var:/v:ro -v $PWD/gen:/in:ro -v $PWD/bench:/b:ro node:22-slim \
-            bash -c 'mkdir -p /tmp/out && bash /b/cgroup-run.sh 15 $(ls /v)' > runs.txt
+            bash -c 'mkdir -p /tmp/out && bash /b/cgroup-run.sh 21 $(ls /v)' > runs.txt
           node bench/summarize.mjs < runs.txt >> result.txt
           cat result.txt
       - name: publish results

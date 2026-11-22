@@ -9,8 +9,6 @@
 // first raw '"' byte, which no JSON string holds inside it. Every other byte or escape is copied as it stands, so
 // a field's JSON is its own escaped bytes from the input, a field cut only at those ASCII tokens.
 
-import { run } from './solve.js';
-
 let B = null; // input bytes
 let O = null; // output bytes
 let oc = 0; // output cursor
@@ -103,6 +101,12 @@ function readRecord(p, width) {
       let closed = false;
       for (;;) {
         const c = b[j];
+        if (c > 92) {
+          // lowercase letters and UTF-8 bytes: the common case first
+          out[o++] = c;
+          j++;
+          continue;
+        }
         if (c === 92) {
           const e = b[j + 1];
           if (e === 34) {
@@ -182,6 +186,11 @@ function readRecord(p, width) {
     // Unquoted text up to the next comma or line break; a CR not followed by LF is dropped (stray_cr).
     for (;;) {
       const c = b[i];
+      if (c > 92) {
+        out[o++] = c;
+        i++;
+        continue;
+      }
       if (c === 44) {
         i++;
         end = 0;
@@ -239,7 +248,8 @@ function readRecord(p, width) {
   return i;
 }
 
-// One case's text, its opening quote at t and its closing quote at n: writes the answer's JSON into O.
+// One case's text, its opening quote at t and its closing quote at n: writes the answer's JSON into O and returns
+// where its reading stopped, the first raw quote after t (n, unless n was found wrongly).
 function readCase(t, n, header) {
   const b = B;
   let p = t + 1;
@@ -265,7 +275,7 @@ function readCase(t, n, header) {
         line++;
       } else break;
     }
-    if (p >= n) break;
+    if (b[p] === 34) break; // the raw quote that ends the JSON string: the end of the text
     recLine = line;
     recRow = wantHeader ? -1 : rows;
     const rowStart = oc;
@@ -331,6 +341,7 @@ function readCase(t, n, header) {
     O[oc++] = 93;
   }
   O[oc++] = 125;
+  return p;
 }
 
 // --- the JSON around the texts ---
@@ -356,6 +367,19 @@ function strEnd(p) {
     if (((j - 1 - k) & 1) === 0) return j;
     j++;
   }
+}
+
+// The closing quote of the text whose opening quote is at p. Inside a JSON string a quote is always \", so the
+// bytes `","header":` (a raw quote, a comma, a raw quote) cannot occur in it: their first occurrence after p ends
+// the text when the header key follows it, as JSON.stringify writes {text, header}. Otherwise strEnd. readCase
+// checks the result (it stops at the first raw quote).
+const HEADER_AFTER = Buffer.from('","header":', 'latin1');
+let exactEnds = false; // true on the second pass, after textEnd guessed a text's end wrongly
+let missedEnd = false;
+function textEnd(p) {
+  if (exactEnds) return strEnd(p);
+  const m = B.indexOf(HEADER_AFTER, p + 1);
+  return m > p ? m : strEnd(p);
 }
 
 function keyIs(p, q, s) {
@@ -396,6 +420,15 @@ function next(p, close) {
 
 /** The bytes of answers.json for the bytes of cases.json, or null to take the plain path. */
 export function answers(buf) {
+  exactEnds = false;
+  missedEnd = false;
+  const out = pass(buf);
+  if (out !== null || !missedEnd) return out;
+  exactEnds = true; // a case with no header key after its text: read the file again, every string end found exactly
+  return pass(buf);
+}
+
+function pass(buf) {
   B = buf;
   try {
     if (hasStructuralEscape()) return null;
@@ -446,7 +479,7 @@ export function answers(buf) {
               if (keyIs(p, kq, 'text') && t < 0) {
                 if (B[w] !== 34) return null;
                 t = w;
-                n = strEnd(w);
+                n = textEnd(w);
                 if (n < 0) return null;
                 p = n + 1;
               } else if (keyIs(p, kq, 'header') && !sawHeader) {
@@ -493,7 +526,11 @@ export function answers(buf) {
           growO(1);
           O[oc++] = 44;
         }
-        readCase(t, n, header);
+        // The reading must stop at the text's own closing quote, else textEnd guessed wrong: take the plain path.
+        if (readCase(t, n, header) !== n) {
+          missedEnd = true;
+          return null;
+        }
         cases++;
         const r = next(p, 93);
         if (r === -2) return null;
@@ -514,12 +551,3 @@ export function answers(buf) {
   }
 }
 
-/** answers(buf), or else the plain path: JSON.parse, run on each case, JSON.stringify. */
-export function answerFile(buf) {
-  const fast = answers(buf);
-  if (fast !== null) return fast;
-  const cases = JSON.parse(buf.toString('utf8'));
-  const out = [];
-  for (let i = 0; i < cases.length; i++) out.push(run(cases[i].input));
-  return Buffer.from(JSON.stringify(out), 'utf8');
-}

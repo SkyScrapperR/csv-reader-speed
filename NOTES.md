@@ -67,12 +67,46 @@
 - Every practice file has quotes and CRs (CRLF or stray), so a "no quote / no CR" fast path never fires on
   realistic data. The general scanner must be fast.
 
-### Optimization target
+### Optimization target (updated with the second brief)
 End-to-end process CPU, because the heat measures container CPU over the whole `node main.ts` run (startup,
-parse, run, stringify, write, GC threads). The qualifying cut is also on the measured time of the whole graded
-run. So I optimize both run() and the I/O around it in main.ts, and check every change with an end-to-end
-CPU benchmark (process.cpuUsage of a child plus wall time), not only a run() micro-benchmark.
+parse, run, stringify, write, GC threads). The qualifying cut uses the graded run's time (the brief says wall).
+Plan: a **byte pipeline** (fast.js). main.ts reads cases.json as a Buffer, walks the JSON itself, reads each CSV
+straight from the JSON-escaped bytes and writes answers.json bytes directly. There is no JSON.parse, no
+JSON.stringify and no per-field JS string. The scorer compares parsed JSON values, so copying each field's own
+escaped bytes from the input is a valid encoding.
+- solve.js `run(input)` stays the plain, string-based reader. It is the correctness reference and the
+  fallback: fast.js returns null on anything unexpected, and main.ts then does JSON.parse + run + JSON.stringify.
+  Unexpected means another JSON shape, an object/array header, or a real `\u00XX` escape of `,` `"` CR or LF.
+- **Rule risk:** the rules text says main.ts "answers each with run". The byte pipeline does not call run(). It
+  calls the same reading logic, re-implemented on bytes. I'll flag this to the user before submitting it.
+
+### Measurements (Linux: GitHub Actions, Xeon 6975P, node:22-slim, `--cpus 1`, cgroup cpu.stat, 15 rounds)
+Synthetic 11 MB set (bench/gen.mjs). CPU ms, median:
+
+| variant | CPU | note |
+|---|---|---|
+| null (empty main.ts) | 54 | subtracted by the grader |
+| u8: utf8 JSON.parse + run + stringify | 457 | first entry's design |
+| l1: latin1 read/write (one-byte strings) | 384 | |
+| l1g: + single-threaded GC flags | 357 | |
+| l1gm: + no TurboFan (Maglev only) | 492 | Maglev-only is bad on Linux (it looked good on Windows) |
+| wkgc: worker, 256 MB semi-space, GC flags | 323 | a worker costs about 38 ms of CPU |
+
+- On a single core, V8's concurrent OSR left the hot loop in slow tiers, and inner-loop OSR kept deopting.
+  Fix: a per-record function (readRecord) that tiers up by normal calls.
+- `--single-threaded-gc` is an implication flag: at runtime it does nothing. The individual flags
+  (`--no-parallel-scavenge --no-concurrent-marking --no-parallel-marking --no-parallel-compaction
+  --no-parallel-pointer-update --no-concurrent-sweeping`) do take effect.
+- Semi-space flags do nothing at runtime for the main isolate, but they apply to a Worker created afterwards.
+- Windows timings (15.6 ms ticks, slow laptop core) mislead on JIT/GC choices. Linux CI decides.
+
+### Correctness record
+- string run(): fuzz/fuzz.mjs 200k + 100k random, fuzz/big.mjs (45 kit-generator files + long/tiny/astral), the
+  6 practice cases. 0 mismatches.
+- byte pipeline: fuzz/e2e.mjs 100 files x 5000 cases = 500k (other escapes, spacing, key orders, odd headers,
+  backslashes, control chars, lone surrogates; 97 files took the byte path), plus the 6 practice cases. 0 mismatches.
 
 ## Submissions
 | # | date (UTC) | commit | submission id | result |
 |---|------------|--------|---------------|--------|
+| 1 | 2026-11-22 10:04 | 2a22b97 | 01a202b6-a030-7609-b963-992e2312c6b9 | safety entry: string run(), utf8 JSON; checks passed |

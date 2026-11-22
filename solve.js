@@ -195,3 +195,12 @@ export function run(input) {
   gErrors = null;
   return { columns: header ? (columns === null ? [] : columns) : null, rows, errors };
 }
+
+/** The plain path for the bytes of a whole cases.json: JSON.parse, run on each case, JSON.stringify (main.ts takes it
+ * when fast.js does not take the file). */
+export function answerPlain(buf) {
+  const cases = JSON.parse(buf.toString('utf8'));
+  const out = [];
+  for (let i = 0; i < cases.length; i++) out.push(run(cases[i].input));
+  return Buffer.from(JSON.stringify(out), 'utf8');
+}
