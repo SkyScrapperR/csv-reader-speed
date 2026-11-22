@@ -136,6 +136,42 @@ Latest Linux round (CPU ms, net of the null entry), current reader:
 Local Windows, pinned to one core, Node 24, practice set: baseline csv-reader net 1937 ms, safety entry
 (string run, utf8) net 1000 ms, **byte pipeline net ~187 ms: about 10x the baseline**.
 
+### Rules check: does anything verify that main.ts calls run()? (2026-11-22, ~12:10 UTC)
+- Text: "Write main.ts, the program the harness runs, which reads every case from /input/cases.json, answers each
+  with run, and writes /output/answers.json." Context: "main.ts, the program the harness runs, which answers every
+  case with it." Baseline main.ts comment: "An entry keeps this driver and replaces solve.js".
+- Nothing verifies it automatically. The harness source (grader/, sim/, contracts/) never references solve.js
+  or run(). The scorer only compares /output/answers.json as JSON values. The requirements' deliverables are
+  LICENSE, main.ts and .makefun/owner.json (solve.js isn't listed). But a listed check says "The make.fun team may
+  disqualify an entry until its competition's results are posted", so a human review could enforce it.
+- The leaderboard marks every entry `compliant: true, prize_eligible: true`, including byte "Escaped-Byte
+  Transducer" entries (ranks 2, 29, 36-55) and entries that declare WebAssembly, which the rules forbid.
+
+### Leaderboard (2026-11-22 ~12:00 UTC)
+- My safety entry 01a202b6: **cpu_us 1,780,000**, rank 7401 of 9151.
+- 29 entries at 0 us, the 30th in the 10 ms bucket (the contender cut), ~160 under 100 ms. 137 of the top 200
+  titles name wasm/simd/liftoff/rust. The fastest pure-JS-titled entries are byte transducers at 0-60 ms.
+- Calibration: safety entry, grader 1780 ms vs Linux CI net ~400-640 ms (same design) vs Windows local net
+  1000 ms. The grader (gVisor) penalizes allocation/GC-heavy code much more than CI; the factor for GC-light
+  code is unknown.
+
+### Hybrid (option 5: run() called on every case) vs byte pipeline vs safety entry
+Hybrid: io.cjs splits the input without a whole-file parse and decodes each text from a latin1 slice
+(JSON.parse of the slice; one-byte strings). It calls `run({text, header})` per case and serializes with a
+hand-written byte writer. run() was reworked: quoted fields in a helper, one compare a char on the scan path.
+Correct: fuzz 200k + e2e 40k + practice, 0 mismatches.
+
+| candidate | Linux CI CPU net of null (3 machines) | local Windows practice set, net | grader |
+|---|---|---|---|
+| byte pipeline (ddf7864) | 80 / 93 / 131 ms | ~172 ms | not yet measured |
+| hybrid (run() per case) | 389 / 423 / 555 ms (wall 1.0-1.4 s) | ~610 ms | not measured |
+| safety entry (2a22b97) | 404 / 479 / 643 ms | ~1000 ms | **1780 ms** |
+| csv-reader 1.0.0 baseline | - | ~1937 ms | - |
+
+Hybrid / bytes = 4.2-4.9x on Linux, 3.5x locally: far past the 1.5x bound, so not submitted. Why: run() must
+allocate ~760k strings and ~70k arrays (GC), and reading them back out of JS strings costs ~100 ms locally
+whatever the method (JS loop, latin1Write per field, joined rows). The byte path does neither.
+
 ### Correctness record
 - string run(): fuzz/fuzz.mjs 200k + 100k random, fuzz/big.mjs (45 kit-generator files + long/tiny/astral), the
   6 practice cases. 0 mismatches.

@@ -3,7 +3,7 @@
 // case by case with csv-reader 1.0.0 as JSON values. usage: node fuzz/e2e-big.mjs [sets=5] [kit dir]
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
-import fast from '../fast.cjs';
+import { run, openBytes, closeBytes } from '../solve.js';
 
 const S = Number(process.argv[2] ?? 5);
 const kit = process.argv[3] ?? 'C:/lomba/csv-reader-speed-01-run-20261121-kit';
@@ -19,7 +19,9 @@ for (let s = 0; s < S; s++) {
   const cases = [];
   for (let i = 0; i < 6; i++) cases.push({ id: `g-000${i + 1}`, input: generate(streamFor(seed, 'case', i), i) });
   const json = JSON.stringify(cases);
-  const out = fast.answers(Buffer.from(json, 'utf8'));
+  const d = openBytes(Buffer.from(json, 'utf8'));
+  if (d !== null) while (d.at >= 0) run(d);
+  const out = d === null ? null : closeBytes(d);
   if (out === null) {
     bad++;
     console.log('set', s, 'did not take the byte path');

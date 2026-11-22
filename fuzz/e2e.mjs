@@ -1,11 +1,16 @@
-// End-to-end fuzzer for the byte pipeline: random cases written as cases.json bytes (by JSON.stringify, and by hand
-// with other spacing, key orders and escapes), answered by fast.js answerFile, compared with csv-reader 1.0.0 case by
-// case as JSON values. usage: node fuzz/e2e.mjs [batches=100] [casesPerBatch=5000] [seed=1] [kit dir]
+// End-to-end fuzzer for main.ts's path: random cases written as cases.json bytes (by JSON.stringify, and by hand
+// with other spacing, key orders and escapes), answered by run's byte form on every case (else the plain path), and
+// compared with csv-reader 1.0.0 case by case as JSON values. usage: node fuzz/e2e.mjs [batches=100] [casesPerBatch=5000] [seed=1] [kit dir]
 import { isDeepStrictEqual } from 'node:util';
-import fast from '../fast.cjs';
-const { answers } = fast;
-import { answerPlain } from '../solve.js';
+import { run, openBytes, closeBytes, answerPlain } from '../solve.js';
 
+// main.ts's path: run's byte form on every case, else the plain path
+function answers(buf) {
+  const d = openBytes(buf);
+  if (d === null) return null;
+  while (d.at >= 0) run(d);
+  return closeBytes(d);
+}
 const answerFile = (buf) => answers(buf) ?? answerPlain(buf);
 
 const [B = 100, K = 5000, S = 1] = process.argv.slice(2, 5).map(Number);
