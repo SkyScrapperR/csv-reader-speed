@@ -22,7 +22,7 @@ let gCut = -1;
 let gEmpty = false;
 
 // Plain bytes, copied as they stand: every byte but the comma, the backslash and the raw quote (PLAIN), and inside a
-// quoted field every byte but the backslash and the raw quote (QPLAIN). The loops copy runs of them 8 (or 4) bytes a
+// quoted field every byte but the backslash and the raw quote (QPLAIN). The loops copy runs of them 4 (or 2) bytes a
 // step, unrolled by bench/unroll.cjs.
 const PLAIN = new Uint8Array(256).fill(1);
 PLAIN[44] = 0;
@@ -231,19 +231,7 @@ function readRecord(p, width) {
             continue;
           }
           out[o++] = c1;
-          const c2 = b[j + 2];
-          if (QPLAIN[c2] !== 1) {
-            j += 2;
-            continue;
-          }
-          out[o++] = c2;
-          const c3 = b[j + 3];
-          if (QPLAIN[c3] !== 1) {
-            j += 3;
-            continue;
-          }
-          out[o++] = c3;
-          j += 4;
+          j += 2;
           continue;
         }
         if (c === 92) {
@@ -311,31 +299,7 @@ function readRecord(p, width) {
           continue;
         }
         out[o++] = c3;
-        const c4 = b[i + 4];
-        if (PLAIN[c4] !== 1) {
-          i += 4;
-          continue;
-        }
-        out[o++] = c4;
-        const c5 = b[i + 5];
-        if (PLAIN[c5] !== 1) {
-          i += 5;
-          continue;
-        }
-        out[o++] = c5;
-        const c6 = b[i + 6];
-        if (PLAIN[c6] !== 1) {
-          i += 6;
-          continue;
-        }
-        out[o++] = c6;
-        const c7 = b[i + 7];
-        if (PLAIN[c7] !== 1) {
-          i += 7;
-          continue;
-        }
-        out[o++] = c7;
-        i += 8;
+        i += 4;
         continue;
       }
       if (c === 44) {
