@@ -186,7 +186,15 @@ from require() of the ES module solve.js). Under the 3% bar on total CPU: kept.
 Gates: string fuzz 500k, e2e 500k, big 35, generator e2e 30, practice 6 (0 mismatches), grade-local 6/6
 reproduced, Node 22 three runs byte-identical.
 
+### Grader calibration (submission 2)
+Grader 330 ms vs Linux CI net ~80-128 ms (factor ~3) vs local Windows net ~187 ms (factor ~1.8). The safety entry
+was 1780 ms (factor ~3.5 over CI). The 0 bucket holds 46 entries, so the contender cut is at 0. The top pure-JS titles stress small
+memory windows. Hypothesis: under gVisor, touching memory (page faults) and syscalls dominate; this entry
+touches ~25 MB (whole input, whole output, heap). Next: measure under gVisor (runsc) in CI, then stream the
+input and output through small reused windows.
+
 ## Submissions
 | # | date (UTC) | commit | submission id | result |
 |---|------------|--------|---------------|--------|
 | 1 | 2026-11-22 10:04 | 2a22b97 | 01a202b6-a030-7609-b963-992e2312c6b9 | safety entry: string run(), utf8 JSON; checks passed |
+| 2 | 2026-11-22 13:08 | 2335b2c | 01a2035f-4c43-7631-bd9a-ed356188a41c | byte pipeline, run() per case; all checks pass; **cpu_us 330,000, rank 392 of 9548** |
