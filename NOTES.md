@@ -193,6 +193,22 @@ memory windows. Hypothesis: under gVisor, touching memory (page faults) and sysc
 touches ~25 MB (whole input, whole output, heap). Next: measure under gVisor (runsc) in CI, then stream the
 input and output through small reused windows.
 
+### gVisor in CI: a grader proxy (2026-11-22 ~14:30 UTC)
+CI now times each candidate as the grader does: a fresh container per run, 1 CPU, 1024 MB, host cgroup cpu.stat
+around it, under gVisor (runsc, from gVisor's apt repository) and runc. Net of the null container, 3 machines:
+
+| candidate | gVisor | runc | grader |
+|---|---|---|---|
+| safety entry 2a22b97 | 746 / 761 / 969 | 524 / 525 / 662 | 1,780,000 us |
+| submission 2 (2335b2c, whole file in memory) | 146 / 149 / 201 | 106 / 108 / 140 | 330,000 us |
+| windowed input + per-case output | 175 / 171 / 224 | 127 / 129 / 167 | not submitted |
+
+- Proxy check: safety / submission 2 = ~5.1 under gVisor, 5.4 on the grader. Grader ~= 2.2 x the gVisor net here.
+- The memory hypothesis is refuted: reading through a 256 KiB window and writing case by case is ~25 ms slower,
+  under gVisor and runc. Reverted. Submission 2's cost is the reader's own CPU (one cold pass, JIT warm-up).
+- Outlook: the contender cut is the 0 bucket (46 entries at 0). For a 0 reading this design would need roughly a
+  10x cut in CPU. That is out of reach for small tweaks.
+
 ## Submissions
 | # | date (UTC) | commit | submission id | result |
 |---|------------|--------|---------------|--------|
