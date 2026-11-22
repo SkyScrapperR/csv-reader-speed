@@ -163,44 +163,32 @@ function readRecord(p, width) {
         }
         if (c === 92) {
           const e = b[j + 1];
-          if (e === 34) {
-            if (b[j + 2] === 92 && b[j + 3] === 34) {
-              out[o++] = 92;
-              out[o++] = 34;
-              j += 4;
-              continue;
-            }
-            closed = true;
+          const dbl = (e === 34) & (b[j + 2] === 92) & (b[j + 3] === 34);
+          if (e === 34 && dbl === 0) {
+            closed = true; // the closing quote
             j += 2;
             break;
           }
-          if (e === 114) {
-            out[o++] = 92;
-            out[o++] = 110;
-            line++;
-            j += b[j + 2] === 92 && b[j + 3] === 110 ? 4 : 2;
-            continue;
-          }
-          if (e === 110) line++;
-          else if (e === 117) {
-            if (b[j + 2] === 48 && b[j + 3] === 48) checkEscape(j);
-            out[o++] = 92;
-            out[o++] = 117;
+          // Every other escape takes one path, so the common "" pairs feed V8 for the rare CRs and LFs in quotes:
+          // "" is one quote (\"), CR and CRLF are an LF (\n), LF stays, any other escape is copied as it stands.
+          const nl = (e === 110) | (e === 114);
+          const crlf = (e === 114) & (b[j + 2] === 92) & (b[j + 3] === 110);
+          out[o++] = 92;
+          out[o++] = nl === 1 ? 110 : e;
+          line += nl;
+          j += 2 + 2 * (dbl | crlf);
+          if (e === 117) {
+            // \uXXXX: its four hex digits follow
+            if (b[j] === 48 && b[j + 1] === 48) checkEscape(j - 2);
+            out[o++] = b[j];
+            out[o++] = b[j + 1];
             out[o++] = b[j + 2];
             out[o++] = b[j + 3];
-            out[o++] = b[j + 4];
-            out[o++] = b[j + 5];
-            j += 6;
-            continue;
+            j += 4;
           }
-          out[o++] = 92;
-          out[o++] = e;
-          j += 2;
           continue;
         }
-        if (c === 34) break;
-        out[o++] = c;
-        j++;
+        break; // neither plain nor a backslash: the raw quote that ends the text (no compare to feed)
       }
       if (closed) {
         const c = b[j];
@@ -209,12 +197,9 @@ function readRecord(p, width) {
           end = 2;
         } else if (c === 44) {
           i = j + 1;
-        } else if (c === 92 && b[j + 1] === 110) {
-          i = j + 2;
-          line++;
-          end = 1;
-        } else if (c === 92 && b[j + 1] === 114 && b[j + 2] === 92 && b[j + 3] === 110) {
-          i = j + 4;
+        } else if (c === 92 && (b[j + 1] === 110 || ((b[j + 1] === 114) & (b[j + 2] === 92) & (b[j + 3] === 110)) === 1)) {
+          // LF or CRLF, one path for both (each compare runs on either kind of file, so V8 has feedback for it)
+          i = j + (b[j + 1] === 110 ? 2 : 4);
           line++;
           end = 1;
         } else {
@@ -295,19 +280,16 @@ function readRecord(p, width) {
       }
       if (c === 92) {
         const e = b[i + 1];
-        if (e === 110) {
-          i += 2;
+        // LF or CRLF ends the record: one path for both (its compares run on either kind of file, so V8 has
+        // feedback for them before it optimizes); a CR not followed by LF is dropped.
+        const crlf = (e === 114) & (b[i + 2] === 92) & (b[i + 3] === 110);
+        if (e === 110 || crlf === 1) {
+          i += 2 + 2 * crlf;
           line++;
           end = 1;
           break;
         }
         if (e === 114) {
-          if (b[i + 2] === 92 && b[i + 3] === 110) {
-            i += 4;
-            line++;
-            end = 1;
-            break;
-          }
           addErr(STRAY);
           i += 2;
           continue;
@@ -328,12 +310,9 @@ function readRecord(p, width) {
         i += 2;
         continue;
       }
-      if (c === 34) {
-        end = 2;
-        break;
-      }
-      out[o++] = c;
-      i++;
+      // neither plain, a comma nor a backslash: the raw quote that ends the text (no compare to feed)
+      end = 2;
+      break;
     }
     if (junkFrom >= 0 && o > junkFrom) addErr(JUNK);
     out[o++] = 34;
@@ -371,15 +350,15 @@ function readCase(t) {
   oc += K_ROWS.length;
   rowsAt = oc;
   for (;;) {
-    // Blank lines (LF, CRLF) are no records.
-    while (b[p] === 92) {
-      if (b[p + 1] === 110) {
-        p += 2;
-        line++;
-      } else if (b[p + 1] === 114 && b[p + 2] === 92 && b[p + 3] === 110) {
-        p += 4;
-        line++;
-      } else break;
+    // Blank lines (LF, CRLF) are no records. The arithmetic runs at every record, blank line or not, so V8 has
+    // feedback for it however late the first blank line comes.
+    for (;;) {
+      const bs = b[p] === 92;
+      const lf = bs & (b[p + 1] === 110);
+      const crlf = bs & (b[p + 1] === 114) & (b[p + 2] === 92) & (b[p + 3] === 110);
+      line += lf | crlf;
+      p += 2 * lf + 4 * crlf;
+      if ((lf | crlf) === 0) break;
     }
     if (b[p] === 34) break; // the raw quote that ends the JSON string: the end of the text
     recLine = line;

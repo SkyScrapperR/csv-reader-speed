@@ -6,17 +6,11 @@ mkv() { # name, sed script applied to main.ts
   d="$V/$1"; mkdir -p "$d"; cp "$R/solve.js" "$R/fast.cjs" "$d/"
   sed -e "$2" "$R/main.ts" > "$d/main.ts"
 }
-# extra V8 flags after the entry's own
-addf() { local s=""; for f in "$@"; do s="$s\nv8.setFlagsFromString('$f');"; done; echo "s/^v8.setFlagsFromString('--no-turbo-inlining');/v8.setFlagsFromString('--no-turbo-inlining');$s/"; }
 mkv cur ''
-# (prev removed)
-
-# mkv spark "$(addf --always-sparkplug)"
-
-mkv tf6000 "$(addf --invocation-count-for-turbofan=6000)"
-mkv tf12k "$(addf --invocation-count-for-turbofan=12000)"
-mkv tf25k "$(addf --invocation-count-for-turbofan=25000)"
-mkv ic1500 "$(addf --invocation-count-for-turbofan=6000 --minimum-invocations-after-ic-update=1500)"
+# the reader before the deopt-avoiding rewrites (commit 10e596d), with this main.ts
+mkv prev ''
+git -C "$R" show 10e596d:fast.cjs > "$V/prev/fast.cjs"
+mkv tf3000 "/invocation-count-for-turbofan/d"
 mkdir -p "$V/null"; echo "" > "$V/null/main.ts"
 # a probe: the entry's main.ts with its phases timed, printed as a PROBE line (lands in runs.txt)
 mkv probe ''
@@ -25,6 +19,7 @@ const t0 = performance.now();
 const v8 = require('node:v8');
 v8.setFlagsFromString('--no-lazy-feedback-allocation');
 v8.setFlagsFromString('--no-turbo-inlining');
+v8.setFlagsFromString('--invocation-count-for-turbofan=6000');
 const { readFileSync, writeFileSync } = require('node:fs');
 const { answers } = require('./fast.cjs');
 const t1 = performance.now();
