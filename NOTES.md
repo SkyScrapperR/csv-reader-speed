@@ -178,7 +178,23 @@ whatever the method (JS loop, latin1Write per field, joined rows). The byte path
 - byte pipeline: fuzz/e2e.mjs 100 files x 5000 cases = 500k (other escapes, spacing, key orders, odd headers,
   backslashes, control chars, lone surrogates; 97 files took the byte path), plus the 6 practice cases. 0 mismatches.
 
+### run() per case (compliance tweak, commit eace6a5)
+The byte reader moved into solve.js. run(input) answers {text, header} as the spec says, and also a ByteCase
+(bytes + a case's position + output). main.ts calls run once for every case. Output is byte-identical to ddf7864's.
+Overhead vs 482ee5e on Linux (3 machines): +1.1/+2.6/+1.6% total CPU, +1.7/+4.0/+2.5% net of null (~2-3 ms,
+from require() of the ES module solve.js). Under the 3% bar on total CPU: kept.
+Gates: string fuzz 500k, e2e 500k, big 35, generator e2e 30, practice 6 (0 mismatches), grade-local 6/6
+reproduced, Node 22 three runs byte-identical.
+
+### Grader calibration (submission 2)
+Grader 330 ms vs Linux CI net ~80-128 ms (factor ~3) vs local Windows net ~187 ms (factor ~1.8). The safety entry
+was 1780 ms (factor ~3.5 over CI). The 0 bucket holds 46 entries, so the contender cut is at 0. The top pure-JS titles stress small
+memory windows. Hypothesis: under gVisor, touching memory (page faults) and syscalls dominate; this entry
+touches ~25 MB (whole input, whole output, heap). Next: measure under gVisor (runsc) in CI, then stream the
+input and output through small reused windows.
+
 ## Submissions
 | # | date (UTC) | commit | submission id | result |
 |---|------------|--------|---------------|--------|
 | 1 | 2026-11-22 10:04 | 2a22b97 | 01a202b6-a030-7609-b963-992e2312c6b9 | safety entry: string run(), utf8 JSON; checks passed |
+| 2 | 2026-11-22 13:08 | 2335b2c | 01a2035f-4c43-7631-bd9a-ed356188a41c | byte pipeline, run() per case; all checks pass; **cpu_us 330,000, rank 392 of 9548** |

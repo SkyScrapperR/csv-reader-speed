@@ -8,29 +8,40 @@ permissions:
 jobs:
   bench:
     runs-on: ubuntu-latest
+    timeout-minutes: 50
     strategy:
       matrix:
         shard: [1, 2, 3]
-    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: install gVisor (runsc)
+        run: |
+          ARCH=$(uname -m); URL=https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}
+          wget -q ${URL}/runsc ${URL}/runsc.sha512
+          sha512sum -c runsc.sha512
+          chmod a+rx runsc && sudo mv runsc /usr/local/bin/
+          sudo /usr/local/bin/runsc install
+          sudo systemctl restart docker
+          docker info | grep -i runtimes
       - run: docker pull -q node:22-slim
       - run: docker run --rm -v $PWD:/r -w /r node:22-slim sh -c 'node bench/gen.mjs /r/gen 42'
       - run: bash bench/variants.sh $PWD/var
-      - name: run in a 1-CPU node:22 container
+      - name: time under gVisor and runc
         run: |
-          (nproc; lscpu | grep -E 'Model name|^CPU\(s\)'; docker run --rm node:22-slim node --version) > result.txt
-          docker run --rm --cpus 1 --memory 1024m -v $PWD/var:/v:ro -v $PWD/gen:/in:ro -v $PWD/bench:/b:ro node:22-slim \
-            bash -c 'mkdir -p /tmp/out && bash /b/cgroup-run.sh 31 $(ls /v)' > runs.txt
-          node bench/summarize.mjs < runs.txt >> result.txt
-          grep PROBE runs.txt | head -12 >> result.txt || true
+          (nproc; lscpu | grep -E 'Model name'; docker run --rm node:22-slim node --version) > result.txt
+          sudo bash bench/host-run.sh 1 runsc $PWD/var $PWD/gen null > /dev/null
+          sudo bash bench/host-run.sh ${ROUNDS:-11} runsc $PWD/var $PWD/gen $(ls var) > runs-gvisor.txt
+          sudo bash bench/host-run.sh ${ROUNDS:-11} runc $PWD/var $PWD/gen $(ls var) > runs-runc.txt
+          echo "== gVisor (runsc)" >> result.txt; node bench/summarize.mjs < runs-gvisor.txt >> result.txt
+          echo "== runc" >> result.txt; node bench/summarize.mjs < runs-runc.txt >> result.txt
           cat result.txt
+        env:
+          ROUNDS: 11
       - name: publish results
         run: |
           git config user.name bench-bot; git config user.email bench-bot@users.noreply.github.com
-          mkdir -p /tmp/res && cp result.txt runs.txt /tmp/res/
-          git fetch origin bench-results || true
-          git checkout --orphan res && git rm -rfq . && cp /tmp/res/* . && git add result.txt runs.txt
+          mkdir -p /tmp/res && cp result.txt runs-*.txt /tmp/res/
+          git checkout --orphan res && git rm -rfq . && cp /tmp/res/* . && git add result.txt runs-*.txt
           git commit -qm "results ${GITHUB_SHA::7} shard ${{ matrix.shard }}" && git push -f origin res:bench-results-${{ matrix.shard }}
