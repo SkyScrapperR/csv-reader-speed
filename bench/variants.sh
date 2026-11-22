@@ -7,12 +7,8 @@ mkv() { # name, sed script applied to main.ts
   sed -e "$2" "$R/main.ts" > "$d/main.ts"
 }
 mkv cur ''
-# the reader before the helper split (commit bfbe943), with this main.ts
-mkv prev ''
-git -C "$R" show bfbe943:fast.cjs > "$V/prev/fast.cjs"
-addf() { local s=""; for f in "$@"; do s="$s\nv8.setFlagsFromString('$f');"; done; echo "s/^v8.setFlagsFromString('--no-turbo-inlining');/v8.setFlagsFromString('--no-turbo-inlining');$s/"; }
-mkv tf2000 "$(addf --invocation-count-for-turbofan=2000)"
-mkv tf4500 "$(addf --invocation-count-for-turbofan=4500)"
+# the reader with its plain-byte runs unrolled less deep (unquoted/quoted)
+for un in "4 4" "4 2" "2 1"; do set -- $un; mkv u$1$2 ''; node "$R/bench/unroll.cjs" "$R/fast.cjs" "$V/u$1$2/fast.cjs" $1 $2; done
 mkdir -p "$V/null"; echo "" > "$V/null/main.ts"
 # a probe: the entry's main.ts with its phases timed, printed as a PROBE line (lands in runs.txt)
 mkv probe ''
