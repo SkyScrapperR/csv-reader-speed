@@ -21,6 +21,16 @@ let gCount = 0; // readRecord's results: field count, where field #width began, 
 let gCut = -1;
 let gEmpty = false;
 
+// Plain bytes, copied as they stand: every byte but the comma, the backslash and the raw quote (PLAIN), and inside a
+// quoted field every byte but the backslash and the raw quote (QPLAIN). The loops copy runs of them 8 (or 4) bytes a
+// step, unrolled by bench/unroll.cjs.
+const PLAIN = new Uint8Array(256).fill(1);
+PLAIN[44] = 0;
+PLAIN[92] = 0;
+PLAIN[34] = 0;
+const QPLAIN = new Uint8Array(256).fill(1);
+QPLAIN[92] = 0;
+QPLAIN[34] = 0;
 const enc = (s) => Buffer.from(s, 'latin1');
 const C_STRAY = enc('{"code":"stray_cr","line":');
 const C_JUNK = enc('{"code":"quote_junk","line":');
@@ -101,10 +111,27 @@ function readRecord(p, width) {
       let closed = false;
       for (;;) {
         const c = b[j];
-        if (c > 92) {
-          // lowercase letters and UTF-8 bytes: the common case first
+        if (QPLAIN[c] === 1) {
           out[o++] = c;
-          j++;
+          const c1 = b[j + 1];
+          if (QPLAIN[c1] !== 1) {
+            j += 1;
+            continue;
+          }
+          out[o++] = c1;
+          const c2 = b[j + 2];
+          if (QPLAIN[c2] !== 1) {
+            j += 2;
+            continue;
+          }
+          out[o++] = c2;
+          const c3 = b[j + 3];
+          if (QPLAIN[c3] !== 1) {
+            j += 3;
+            continue;
+          }
+          out[o++] = c3;
+          j += 4;
           continue;
         }
         if (c === 92) {
@@ -187,9 +214,51 @@ function readRecord(p, width) {
     // Unquoted text up to the next comma or line break; a CR not followed by LF is dropped (stray_cr).
     for (;;) {
       const c = b[i];
-      if (c > 92) {
+      if (PLAIN[c] === 1) {
         out[o++] = c;
-        i++;
+        const c1 = b[i + 1];
+        if (PLAIN[c1] !== 1) {
+          i += 1;
+          continue;
+        }
+        out[o++] = c1;
+        const c2 = b[i + 2];
+        if (PLAIN[c2] !== 1) {
+          i += 2;
+          continue;
+        }
+        out[o++] = c2;
+        const c3 = b[i + 3];
+        if (PLAIN[c3] !== 1) {
+          i += 3;
+          continue;
+        }
+        out[o++] = c3;
+        const c4 = b[i + 4];
+        if (PLAIN[c4] !== 1) {
+          i += 4;
+          continue;
+        }
+        out[o++] = c4;
+        const c5 = b[i + 5];
+        if (PLAIN[c5] !== 1) {
+          i += 5;
+          continue;
+        }
+        out[o++] = c5;
+        const c6 = b[i + 6];
+        if (PLAIN[c6] !== 1) {
+          i += 6;
+          continue;
+        }
+        out[o++] = c6;
+        const c7 = b[i + 7];
+        if (PLAIN[c7] !== 1) {
+          i += 7;
+          continue;
+        }
+        out[o++] = c7;
+        i += 8;
         continue;
       }
       if (c === 44) {
@@ -542,16 +611,4 @@ function pass(buf) {
   }
 }
 
-// A small constant text holding every rare construct (BOM, stray CRs, quote junk, "" escapes, CRs inside quotes, an
-// unterminated quote, short, long and blank rows, other escapes), read once before the real input so V8 has type
-// feedback for every branch when it optimizes the reader. It reads no case and keeps nothing: each pass starts afresh.
-const WARM_TEXT = '﻿a,b,c\r\n"x""y",2,3\r\nq\rr,"m\r\nn",o\n"j"kg,1,2,3,4\n1\n\n"p"\r,"z\rw",\\\u0001\n"unterminated,1,2\n';
-
-function warmUp() {
-  const text = WARM_TEXT;
-  const lf = text.replace(/\r\n/g, '\n');
-  answers(Buffer.from(JSON.stringify([{ id: 'w', input: { text, header: true } }, { id: 'v', input: { text: lf, header: false } }]), 'utf8'));
-}
-
-module.exports = { answers, warmUp };
-
+module.exports = { answers };

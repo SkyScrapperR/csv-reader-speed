@@ -6,9 +6,8 @@ const v8 = require('node:v8');
 v8.setFlagsFromString('--no-lazy-feedback-allocation');
 v8.setFlagsFromString('--no-turbo-inlining');
 const { readFileSync, writeFileSync } = require('node:fs');
-const { answers, warmUp } = require('./fast.cjs');
+const { answers } = require('./fast.cjs');
 
-warmUp();
 const env = process.env;
 const input = readFileSync((env.MAKEFUN_INPUT_DIR || '/input') + '/cases.json');
 let out = answers(input);

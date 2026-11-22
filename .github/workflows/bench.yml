@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - run: docker pull -q node:22-slim
       - run: docker run --rm -v $PWD:/r -w /r node:22-slim sh -c 'node bench/gen.mjs /r/gen 42'
       - run: bash bench/variants.sh $PWD/var
