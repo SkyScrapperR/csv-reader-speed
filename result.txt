@@ -1,0 +1,13 @@
+4
+Model name:                              AMD EPYC 7763 64-Core Processor
+v22.23.5
+== gVisor (runsc)
+null     cpu med   207.4 trim   206.4 net    -1.0 min   198.4 max   225.7  wall med   297.8
+safety   cpu med  1180.5 trim  1176.0 net   968.6 min  1124.7 max  1275.1  wall med  1257.3
+whole    cpu med   405.5 trim   407.9 net   200.5 min   395.5 max   444.0  wall med   505.0
+win      cpu med   430.2 trim   431.7 net   224.3 min   415.8 max   516.9  wall med   525.1
+== runc
+null     cpu med   108.4 trim   108.9 net     0.5 min   103.7 max   113.5  wall med   242.9
+safety   cpu med   759.5 trim   770.2 net   661.8 min   748.3 max   802.8  wall med   900.2
+whole    cpu med   248.0 trim   248.5 net   140.1 min   243.1 max   269.9  wall med   379.4
+win      cpu med   274.0 trim   275.3 net   166.8 min   269.2 max   313.2  wall med   386.2

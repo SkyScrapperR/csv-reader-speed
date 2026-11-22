@@ -1,0 +1,62 @@
++ curl -fsSL https://gvisor.dev/archive.key
++ sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
++ sudo tee /etc/apt/sources.list.d/gvisor.list
+++ dpkg --print-architecture
++ echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main'
+deb [arch=amd64 signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main
++ sudo apt-get update -qq
++ sudo apt-get install -y -qq runsc
+Selecting previously unselected package runsc.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 214296 files and directories currently installed.)
+Preparing to unpack .../runsc_20261116.0_amd64.deb ...
+Unpacking runsc (20261116.0) ...
+Setting up runsc (20261116.0) ...
+
+Running kernel seems to be up-to-date.
+
+Restarting services...
+
+Service restarts being deferred:
+ systemctl restart hosted-compute-agent.service
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
++ sudo runsc install
+2026/11/22 13:46:45 Runtime runsc not found: adding
+2026/11/22 13:46:45 Successfully updated config.
++ sudo systemctl restart docker
++ docker info
++ grep -iA2 runtimes
+ Runtimes: io.containerd.runc.v2 runc runsc
+ Default Runtime: runc
+ Init Binary: docker-init
++ docker run --rm --runtime=runsc node:22-slim node -e 'console.log('\''runsc ok'\'', process.version)'
+Unable to find image 'node:22-slim' locally
+22-slim: Pulling from library/node
+dd051e1b8c92: Pulling fs layer
+aa4e89108622: Pulling fs layer
+076cba098ace: Pulling fs layer
+cce880541c96: Pulling fs layer
+0c4023204e5b: Pulling fs layer
+076cba098ace: Download complete
+cce880541c96: Download complete
+aa4e89108622: Download complete
+a9b95a4f511d: Download complete
+dd051e1b8c92: Download complete
+2aa6e497e2db: Download complete
+0c4023204e5b: Download complete
+dd051e1b8c92: Pull complete
+076cba098ace: Pull complete
+0c4023204e5b: Pull complete
+cce880541c96: Pull complete
+aa4e89108622: Pull complete
+Digest: sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+Status: Downloaded newer image for node:22-slim
+runsc ok v22.23.5
++ uname -r
+7.0.0-1020-azure
++ cat /sys/fs/cgroup/cgroup.controllers
+cpuset cpu io memory hugetlb pids rdma misc dmem
