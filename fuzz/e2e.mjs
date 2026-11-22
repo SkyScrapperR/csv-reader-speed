@@ -2,7 +2,8 @@
 // with other spacing, key orders and escapes), answered by fast.js answerFile, compared with csv-reader 1.0.0 case by
 // case as JSON values. usage: node fuzz/e2e.mjs [batches=100] [casesPerBatch=5000] [seed=1] [kit dir]
 import { isDeepStrictEqual } from 'node:util';
-import { answers } from '../fast.js';
+import fast from '../fast.cjs';
+const { answers } = fast;
 import { answerPlain } from '../solve.js';
 
 const answerFile = (buf) => answers(buf) ?? answerPlain(buf);

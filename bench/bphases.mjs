@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { setFlagsFromString } from 'node:v8';
 for (const f of (process.env.RTFLAGS ?? '--no-incremental-marking').split(' ').filter(Boolean)) setFlagsFromString(f);
-const { answers } = await import(new URL('../fast.js', import.meta.url).href);
+const { answers } = (await import(new URL('../fast.cjs', import.meta.url).href)).default;
 const answerFile = (buf) => answers(buf);
 const t = []; const mark = (n) => { const u = process.cpuUsage(); t.push([n, performance.now(), (u.user + u.system) / 1000]); };
 mark('s');

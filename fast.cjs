@@ -129,6 +129,7 @@ function readRecord(p, width) {
           }
           if (e === 110) line++;
           else if (e === 117) {
+            if (b[j + 2] === 48 && b[j + 3] === 48) checkEscape(j);
             out[o++] = 92;
             out[o++] = 117;
             out[o++] = b[j + 2];
@@ -216,6 +217,7 @@ function readRecord(p, width) {
           continue;
         }
         if (e === 117) {
+          if (b[i + 2] === 48 && b[i + 3] === 48) checkEscape(i);
           out[o++] = 92;
           out[o++] = 117;
           out[o++] = b[i + 2];
@@ -388,26 +390,14 @@ function keyIs(p, q, s) {
   return true;
 }
 
-const U00 = Buffer.from([92, 117, 48, 48]); // the bytes of a \u00 escape
-
-// True when a \u00XX escape in the file spells a comma, a quote, a CR or an LF (\u002c, \u0022, \u000d, \u000a), a
-// CSV character this reader would not see as one. JSON.stringify never writes these.
-function hasStructuralEscape() {
-  const b = B;
-  let j = 0;
-  for (;;) {
-    j = b.indexOf(U00, j);
-    if (j < 0) return false;
-    const h = b[j + 4];
-    const l = b[j + 5] | 32;
-    if ((h === 50 && (l === 50 || l === 99)) || (h === 48 && (l === 97 || l === 100))) {
-      // an escape only when the run of backslashes ending at j is odd (\\u0022 is a backslash, then u0022)
-      let k = j - 1;
-      while (k >= 0 && b[k] === 92) k--;
-      if (((j - k) & 1) === 1) return true;
-    }
-    j += 4;
-  }
+// A \u00XX escape in a text at j, met by the reader as an escape: when it spells a comma, a quote, a CR or an LF
+// (\u002c, \u0022, \u000d, \u000a), a CSV character this reader does not read as one, the pass gives up and
+// the plain path answers. JSON.stringify never writes these.
+let structural = false;
+function checkEscape(j) {
+  const h = B[j + 4];
+  const l = B[j + 5] | 32;
+  if ((h === 50 && (l === 50 || l === 99)) || (h === 48 && (l === 97 || l === 100))) structural = true;
 }
 
 // After a value at p: the position past a comma (next pair) as a positive number, -1 at the closing brace, else -2.
@@ -419,7 +409,7 @@ function next(p, close) {
 }
 
 /** The bytes of answers.json for the bytes of cases.json, or null to take the plain path. */
-export function answers(buf) {
+function answers(buf) {
   exactEnds = false;
   missedEnd = false;
   const out = pass(buf);
@@ -431,7 +421,7 @@ export function answers(buf) {
 function pass(buf) {
   B = buf;
   try {
-    if (hasStructuralEscape()) return null;
+    structural = false;
     O = Buffer.allocUnsafe(4 * buf.length + 4096);
     E = Buffer.allocUnsafe(65536);
     oc = 0;
@@ -531,6 +521,7 @@ function pass(buf) {
           missedEnd = true;
           return null;
         }
+        if (structural) return null;
         cases++;
         const r = next(p, 93);
         if (r === -2) return null;
@@ -550,4 +541,17 @@ function pass(buf) {
     E = null;
   }
 }
+
+// A small constant text holding every rare construct (BOM, stray CRs, quote junk, "" escapes, CRs inside quotes, an
+// unterminated quote, short, long and blank rows, other escapes), read once before the real input so V8 has type
+// feedback for every branch when it optimizes the reader. It reads no case and keeps nothing: each pass starts afresh.
+const WARM_TEXT = '﻿a,b,c\r\n"x""y",2,3\r\nq\rr,"m\r\nn",o\n"j"kg,1,2,3,4\n1\n\n"p"\r,"z\rw",\\\u0001\n"unterminated,1,2\n';
+
+function warmUp() {
+  const text = WARM_TEXT;
+  const lf = text.replace(/\r\n/g, '\n');
+  answers(Buffer.from(JSON.stringify([{ id: 'w', input: { text, header: true } }, { id: 'v', input: { text: lf, header: false } }]), 'utf8'));
+}
+
+module.exports = { answers, warmUp };
 
