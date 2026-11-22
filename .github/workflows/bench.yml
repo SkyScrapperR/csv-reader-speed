@@ -3,19 +3,28 @@ on:
   push:
     branches: [bench-ci]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   bench:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - run: nproc; lscpu | head -20; docker pull -q node:22-slim
-      - run: docker run --rm -v $PWD:/r -w /r node:22-slim sh -c 'node --version && node bench/gen.mjs /r/gen 42'
+      - run: docker pull -q node:22-slim
+      - run: docker run --rm -v $PWD:/r -w /r node:22-slim sh -c 'node bench/gen.mjs /r/gen 42'
       - run: bash bench/variants.sh $PWD/var
       - name: run in a 1-CPU node:22 container
         run: |
+          (nproc; lscpu | grep -E 'Model name|^CPU\(s\)'; docker run --rm node:22-slim node --version) > result.txt
           docker run --rm --cpus 1 --memory 1024m -v $PWD/var:/v:ro -v $PWD/gen:/in:ro -v $PWD/bench:/b:ro node:22-slim \
-            bash -c 'mkdir -p /tmp/out && bash /b/cgroup-run.sh ${ROUNDS:-15} $(ls /v)' | tee runs.txt
-          node bench/summarize.mjs < runs.txt
-        env:
-          ROUNDS: 15
+            bash -c 'mkdir -p /tmp/out && bash /b/cgroup-run.sh 15 $(ls /v)' > runs.txt
+          node bench/summarize.mjs < runs.txt >> result.txt
+          cat result.txt
+      - name: publish results
+        run: |
+          git config user.name bench-bot; git config user.email bench-bot@users.noreply.github.com
+          mkdir -p /tmp/res && cp result.txt runs.txt /tmp/res/
+          git fetch origin bench-results || true
+          git checkout --orphan res && git rm -rfq . && cp /tmp/res/* . && git add result.txt runs.txt
+          git commit -qm "results ${GITHUB_SHA::7}" && git push -f origin res:bench-results
