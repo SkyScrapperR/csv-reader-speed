@@ -67,12 +67,82 @@
 - Every practice file has quotes and CRs (CRLF or stray), so a "no quote / no CR" fast path never fires on
   realistic data. The general scanner must be fast.
 
-### Optimization target
+### Optimization target (updated with the second brief)
 End-to-end process CPU, because the heat measures container CPU over the whole `node main.ts` run (startup,
-parse, run, stringify, write, GC threads). The qualifying cut is also on the measured time of the whole graded
-run. So I optimize both run() and the I/O around it in main.ts, and check every change with an end-to-end
-CPU benchmark (process.cpuUsage of a child plus wall time), not only a run() micro-benchmark.
+parse, run, stringify, write, GC threads). The qualifying cut uses the graded run's time (the brief says wall).
+Plan: a **byte pipeline** (fast.cjs, loaded by a CommonJS main.ts; the repo has no package.json). main.ts reads cases.json as a Buffer, walks the JSON itself, reads each CSV
+straight from the JSON-escaped bytes and writes answers.json bytes directly. There is no JSON.parse, no
+JSON.stringify and no per-field JS string. The scorer compares parsed JSON values, so copying each field's own
+escaped bytes from the input is a valid encoding.
+- solve.js `run(input)` stays the plain, string-based reader. It is the correctness reference and the
+  fallback: fast.cjs returns null on anything unexpected, and main.ts then does JSON.parse + run + JSON.stringify.
+  Unexpected means another JSON shape, an object/array header, or a real `\u00XX` escape of `,` `"` CR or LF.
+- **Rule risk:** the rules text says main.ts "answers each with run". The byte pipeline does not call run(). It
+  calls the same reading logic, re-implemented on bytes. I'll flag this to the user before submitting it.
+
+### Measurements (Linux: GitHub Actions, Xeon 6975P, node:22-slim, `--cpus 1`, cgroup cpu.stat, 15 rounds)
+Synthetic 11 MB set (bench/gen.mjs). CPU ms, median:
+
+| variant | CPU | note |
+|---|---|---|
+| null (empty main.ts) | 54 | subtracted by the grader |
+| u8: utf8 JSON.parse + run + stringify | 457 | first entry's design |
+| l1: latin1 read/write (one-byte strings) | 384 | |
+| l1g: + single-threaded GC flags | 357 | |
+| l1gm: + no TurboFan (Maglev only) | 492 | Maglev-only is bad on Linux (it looked good on Windows) |
+| wkgc: worker, 256 MB semi-space, GC flags | 323 | a worker costs about 38 ms of CPU |
+
+- On a single core, V8's concurrent OSR left the hot loop in slow tiers, and inner-loop OSR kept deopting.
+  Fix: a per-record function (readRecord) that tiers up by normal calls.
+- `--single-threaded-gc` is an implication flag: at runtime it does nothing. The individual flags
+  (`--no-parallel-scavenge --no-concurrent-marking --no-parallel-marking --no-parallel-compaction
+  --no-parallel-pointer-update --no-concurrent-sweeping`) do take effect.
+- Semi-space flags do nothing at runtime for the main isolate, but they apply to a Worker created afterwards.
+- Windows timings (15.6 ms ticks, slow laptop core) mislead on JIT/GC choices. Linux CI decides.
+
+### Byte pipeline results (Linux CI, 3 shards a round, interleaved runs; ms CPU net of null)
+Machines differ between runs (Xeon 6975P / 8573C, EPYC 7763 / 9V45 / 9V74), so compare only within a run.
+- Byte path vs string path: net ~177 vs ~304 (best string variant l1g) and ~402 (plain utf8, first entry).
+- CommonJS main.ts (no package.json type, one require) beats ESM by ~11 ms. process.exit(0) at the end: no gain.
+- Flags: `--no-turbo-inlining` helps (~10 ms). `--no-lazy-feedback-allocation` is neutral; kept.
+  Lower TurboFan thresholds (`--invocation-count-for-turbofan` 50/200/500) are 20-40 ms WORSE on Linux, though
+  better on Windows.
+- A JIT warm-up on a constant synthetic text (to avoid deopts) is 5-9 ms worse on Linux: dropped.
+- Node 22's V8 has Maglev off by default (Ignition -> Sparkplug -> TurboFan). Node 24 locally has it on, so
+  local JIT tuning is unreliable. Use the Node 22 binary or CI.
+- Reader loop: a 256-entry class table for plain bytes, unrolled 8 bytes (unquoted) / 4 (quoted):
+  -10 ms net on Linux, -30% warm locally.
+- Header-agnostic reading: the first record is kept aside and errors are kept as numbers until the `header` key
+  (after the text) is read. This drops the per-text end search: -10% warm locally, -7 to -10 ms net on Linux.
+- Deopts: rare branches first taken late (an LF in a CRLF file, a CR in quotes, the end of text, an unterminated
+  quote) made TurboFan deopt readRecord, which then ran in baseline code until it re-tiered. Fixes:
+  - one code path for LF and CRLF, and for every escape inside quotes, so the common cases feed the rare ones;
+  - no compare where the class table already decides;
+  - the rare work moved into small helpers (uEsc, quotedEnd) called from sites that run at every record or every
+    quoted field, so a late deopt only hits the helper.
+  Result: net -13 to -17 ms on Linux. After that, the TurboFan threshold no longer matters (default kept), and
+  unroll depth 8/4 vs 4/2 vs 2/1 is within noise (4/2 kept).
+- Probe (Linux, phases of one run): module load ~2 ms, read ~4-5 ms, the one pass over all cases 45-90 ms
+  (machine-dependent; a second warm pass 30-45 ms), write ~4 ms.
+
+Latest Linux round (CPU ms, net of the null entry), current reader:
+
+| machine | null | entry | entry net |
+|---|---|---|---|
+| EPYC 9V74 | 57 | 158 | ~101 |
+| Xeon 8573C | 69 | 192 | ~125 |
+| EPYC 9V45 | 52 | 137 | ~87 |
+
+Local Windows, pinned to one core, Node 24, practice set: baseline csv-reader net 1937 ms, safety entry
+(string run, utf8) net 1000 ms, **byte pipeline net ~187 ms: about 10x the baseline**.
+
+### Correctness record
+- string run(): fuzz/fuzz.mjs 200k + 100k random, fuzz/big.mjs (45 kit-generator files + long/tiny/astral), the
+  6 practice cases. 0 mismatches.
+- byte pipeline: fuzz/e2e.mjs 100 files x 5000 cases = 500k (other escapes, spacing, key orders, odd headers,
+  backslashes, control chars, lone surrogates; 97 files took the byte path), plus the 6 practice cases. 0 mismatches.
 
 ## Submissions
 | # | date (UTC) | commit | submission id | result |
 |---|------------|--------|---------------|--------|
+| 1 | 2026-11-22 10:04 | 2a22b97 | 01a202b6-a030-7609-b963-992e2312c6b9 | safety entry: string run(), utf8 JSON; checks passed |
