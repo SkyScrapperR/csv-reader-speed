@@ -69,20 +69,47 @@ function putNumE(v) {
   E[ec++] = 48 + (v % 10);
 }
 
-// An error's head: {"code":...,"line":L,"row":R (the caller closes it).
-function errHead(code) {
-  growE(96);
-  if (ec > 0) E[ec++] = 44;
-  putE(code);
-  putNumE(recLine);
-  putE(K_ROW);
-  if (recRow < 0) putE(K_NULL);
-  else putNumE(recRow);
-}
+// The case's errors, kept as numbers until its header is known: code (an index of CODES), line, the ordinal of its
+// record among the records read (the first is 0; its row follows from the header), and the short row's field count
+// or the long row's index in EXTRAS. They are written as JSON when the case ends (writeErrors).
+const CODES = [C_STRAY, C_JUNK, C_UNTERM, C_SHORT, C_LONG];
+const STRAY = 0;
+const JUNK = 1;
+const UNTERM = 2;
+const SHORT = 3;
+const LONG = 4;
+let ERRS = []; // 4 numbers an error
+let EXTRAS = []; // a long row's cut fields, as their JSON bytes
 
 function addErr(code) {
-  errHead(code);
-  E[ec++] = 125;
+  ERRS.push(code, recLine, recRow, 0);
+}
+
+function writeErrors(header) {
+  const errs = ERRS;
+  for (let k = 0; k < errs.length; k += 4) {
+    const code = errs[k];
+    const rec = errs[k + 2];
+    growE(96);
+    if (ec > 0) E[ec++] = 44;
+    putE(CODES[code]);
+    putNumE(errs[k + 1]);
+    putE(K_ROW);
+    // the header record has no row; with a header every later record's row is one less than its ordinal
+    if (header && rec === 0) putE(K_NULL);
+    else putNumE(header ? rec - 1 : rec);
+    if (code === SHORT) {
+      putE(K_FIELDS);
+      putNumE(errs[k + 3]);
+    } else if (code === LONG) {
+      const extra = EXTRAS[errs[k + 3]];
+      growE(extra.length + 16);
+      putE(K_EXTRA);
+      putE(extra);
+      E[ec++] = 93;
+    }
+    E[ec++] = 125;
+  }
 }
 
 // Reads one record from p (not at a blank line nor the end) into O as "f1","f2",..., returns the next position.
@@ -204,7 +231,7 @@ function readRecord(p, width) {
         // The quote never closes: it is a literal character, and the text after it is read again as unquoted.
         o = fstart + 1;
         line = openLine;
-        addErr(C_UNTERM);
+        addErr(UNTERM);
         out[o++] = 92;
         out[o++] = 34;
         i = open + 2;
@@ -281,7 +308,7 @@ function readRecord(p, width) {
             end = 1;
             break;
           }
-          addErr(C_STRAY);
+          addErr(STRAY);
           i += 2;
           continue;
         }
@@ -308,7 +335,7 @@ function readRecord(p, width) {
       out[o++] = c;
       i++;
     }
-    if (junkFrom >= 0 && o > junkFrom) addErr(C_JUNK);
+    if (junkFrom >= 0 && o > junkFrom) addErr(JUNK);
     out[o++] = 34;
     if (end !== 0) break;
   }
@@ -319,22 +346,30 @@ function readRecord(p, width) {
   return i;
 }
 
-// One case's text, its opening quote at t and its closing quote at n: writes the answer's JSON into O and returns
-// where its reading stopped, the first raw quote after t (n, unless n was found wrongly).
-function readCase(t, n, header) {
+// One case's text, its opening quote at t: reads its records into O as the rows of {"rows":[ (the first record kept
+// aside, since whether it is the header is told only by the "header" key, which may follow the text), keeps its
+// errors as numbers, and returns where the reading stopped: the first raw quote after t, the text's end.
+let FIRST = null; // the first record's fields JSON, or null
+let rowsAt = 0; // where the rows begin in O
+let rowCount = 0; // rows written to O (the records after the first)
+function readCase(t) {
   const b = B;
   let p = t + 1;
   if (b[p] === 0xef && b[p + 1] === 0xbb && b[p + 2] === 0xbf) p += 3;
   else if (b[p] === 92 && b[p + 1] === 117 && (b[p + 2] | 32) === 102 && (b[p + 3] | 32) === 101 && (b[p + 4] | 32) === 102 && (b[p + 5] | 32) === 102) p += 6;
-  ec = 0;
   line = 1;
+  ERRS = [];
+  EXTRAS = [];
+  FIRST = null;
   let width = -1;
-  let wantHeader = header;
-  let columns = null;
   let rows = 0;
-  growO(K_ROWS.length + 4 * (n - p) + 64);
+  let records = 0; // records read so far, the first included
+  // The rows take at most 4 bytes a byte of text (a field of n bytes is at most n + 3 bytes of JSON): room for all the
+  // texts left; short rows' padding and the errors get room of their own.
+  growO(K_ROWS.length + 4 * (B.length - p) + 64);
   O.set(K_ROWS, oc);
   oc += K_ROWS.length;
+  rowsAt = oc;
   for (;;) {
     // Blank lines (LF, CRLF) are no records.
     while (b[p] === 92) {
@@ -348,7 +383,7 @@ function readCase(t, n, header) {
     }
     if (b[p] === 34) break; // the raw quote that ends the JSON string: the end of the text
     recLine = line;
-    recRow = wantHeader ? -1 : rows;
+    recRow = records;
     const rowStart = oc;
     if (rows > 0) O[oc++] = 44;
     O[oc++] = 91;
@@ -360,18 +395,16 @@ function readCase(t, n, header) {
       oc = rowStart;
       continue;
     }
-    if (width < 0) width = count;
-    if (wantHeader) {
-      columns = Buffer.from(O.subarray(body, oc));
+    records++;
+    if (width < 0) {
+      // The first record: the header, or the first row (writeCase decides). Its width is the width.
+      width = count;
+      FIRST = Buffer.from(O.subarray(body, oc));
       oc = rowStart;
-      wantHeader = false;
       continue;
     }
     if (count < width) {
-      errHead(C_SHORT);
-      putE(K_FIELDS);
-      putNumE(count);
-      E[ec++] = 125;
+      ERRS.push(SHORT, recLine, recRow, count);
       growO(3 * (width - count) + 64);
       const o = O;
       for (let k = count; k < width; k++) {
@@ -380,19 +413,35 @@ function readCase(t, n, header) {
         o[oc++] = 34;
       }
     } else if (count > width) {
-      const extra = O.subarray(gCut + 1, oc);
-      errHead(C_LONG);
-      growE(extra.length + 8);
-      putE(K_EXTRA);
-      putE(extra);
-      E[ec++] = 93;
-      E[ec++] = 125;
+      ERRS.push(LONG, recLine, recRow, EXTRAS.length);
+      EXTRAS.push(Buffer.from(O.subarray(gCut + 1, oc)));
       oc = gCut;
     }
     O[oc++] = 93;
     rows++;
   }
-  growO(ec + (columns === null ? 0 : columns.length) + 64);
+  rowCount = rows;
+  return p;
+}
+
+// Ends the case readCase read, its header now known: the first record as the columns, or as the first row (the rows
+// moved up to make room), then the errors and the columns.
+function writeCase(header) {
+  if (!header && FIRST !== null) {
+    const room = FIRST.length + 2 + (rowCount > 0 ? 1 : 0);
+    growO(room);
+    O.copyWithin(rowsAt + room, rowsAt, oc);
+    let o = rowsAt;
+    O[o++] = 91;
+    O.set(FIRST, o);
+    o += FIRST.length;
+    O[o++] = 93;
+    if (rowCount > 0) O[o++] = 44;
+    oc += room;
+  }
+  ec = 0;
+  writeErrors(header);
+  growO(ec + (FIRST === null ? 0 : FIRST.length) + 64);
   O.set(K_ERRORS, oc);
   oc += K_ERRORS.length;
   O.set(E.subarray(0, ec), oc);
@@ -402,17 +451,16 @@ function readCase(t, n, header) {
   if (!header) {
     O.set(K_NULL, oc);
     oc += 4;
-  } else if (columns === null) {
+  } else if (FIRST === null) {
     O[oc++] = 91;
     O[oc++] = 93;
   } else {
     O[oc++] = 91;
-    O.set(columns, oc);
-    oc += columns.length;
+    O.set(FIRST, oc);
+    oc += FIRST.length;
     O[oc++] = 93;
   }
   O[oc++] = 125;
-  return p;
 }
 
 // --- the JSON around the texts ---
@@ -438,19 +486,6 @@ function strEnd(p) {
     if (((j - 1 - k) & 1) === 0) return j;
     j++;
   }
-}
-
-// The closing quote of the text whose opening quote is at p. Inside a JSON string a quote is always \", so the
-// bytes `","header":` (a raw quote, a comma, a raw quote) cannot occur in it: their first occurrence after p ends
-// the text when the header key follows it, as JSON.stringify writes {text, header}. Otherwise strEnd. readCase
-// checks the result (it stops at the first raw quote).
-const HEADER_AFTER = Buffer.from('","header":', 'latin1');
-let exactEnds = false; // true on the second pass, after textEnd guessed a text's end wrongly
-let missedEnd = false;
-function textEnd(p) {
-  if (exactEnds) return strEnd(p);
-  const m = B.indexOf(HEADER_AFTER, p + 1);
-  return m > p ? m : strEnd(p);
 }
 
 function keyIs(p, q, s) {
@@ -479,15 +514,6 @@ function next(p, close) {
 
 /** The bytes of answers.json for the bytes of cases.json, or null to take the plain path. */
 function answers(buf) {
-  exactEnds = false;
-  missedEnd = false;
-  const out = pass(buf);
-  if (out !== null || !missedEnd) return out;
-  exactEnds = true; // a case with no header key after its text: read the file again, every string end found exactly
-  return pass(buf);
-}
-
-function pass(buf) {
   B = buf;
   try {
     structural = false;
@@ -507,7 +533,6 @@ function pass(buf) {
         p = ws(p + 1);
         let sawId = false;
         let t = -1;
-        let n = -1;
         let header = false;
         let sawInput = false;
         let sawHeader = false;
@@ -537,10 +562,13 @@ function pass(buf) {
               w = ws(w + 1);
               if (keyIs(p, kq, 'text') && t < 0) {
                 if (B[w] !== 34) return null;
+                // the text is read where it stands; the reading stops at its closing quote
+                if (cases > 0) {
+                  growO(1);
+                  O[oc++] = 44;
+                }
                 t = w;
-                n = textEnd(w);
-                if (n < 0) return null;
-                p = n + 1;
+                p = readCase(w) + 1;
               } else if (keyIs(p, kq, 'header') && !sawHeader) {
                 sawHeader = true;
                 // header === true: only the literal true; any other primitive (false, null, a number, a string) is false.
@@ -581,16 +609,8 @@ function pass(buf) {
           p = r;
         }
         if (!sawInput) return null;
-        if (cases > 0) {
-          growO(1);
-          O[oc++] = 44;
-        }
-        // The reading must stop at the text's own closing quote, else textEnd guessed wrong: take the plain path.
-        if (readCase(t, n, header) !== n) {
-          missedEnd = true;
-          return null;
-        }
         if (structural) return null;
+        writeCase(header);
         cases++;
         const r = next(p, 93);
         if (r === -2) return null;
